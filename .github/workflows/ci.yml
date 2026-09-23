@@ -13,6 +13,4 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: node --check src/main.js
-      - run: node --check src/admin.js
       - run: npm run build

@@ -1,7 +1,7 @@
--- Run equivalent assertions in a local Supabase test environment.
--- Expected behavior:
--- 1. anon can SELECT active products only.
--- 2. anon cannot SELECT orders or order_items.
--- 3. anon can EXECUTE create_public_order.
--- 4. admin can SELECT/UPDATE orders and INSERT/UPDATE products.
--- 5. authenticated non-admin cannot update products/orders.
+-- Verifikasi setelah migration:
+-- 1. anon hanya membaca site_settings dan products aktif.
+-- 2. anon tidak dapat membaca orders/order_items.
+-- 3. anon dapat execute create_public_order.
+-- 4. admin dapat membaca/mengubah orders dan mengelola products/settings.
+-- 5. non-admin tidak dapat mengubah products/orders/settings.
+-- 6. Storage site-media: public read; admin-only write/delete.
