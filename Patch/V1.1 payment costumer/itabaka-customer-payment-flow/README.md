@@ -5,7 +5,7 @@ Versi ini berfokus pada alur customer:
 1. Pilih produk.
 2. Isi nama, email, alamat, nomor HP.
 3. Pilih **DP** atau **Full Payment**.
-4. Pilih **QRIS** atau **Transfer Bank BCA**.
+4. Pilih **QRIS** atau **Transfer Bank BCA Blue**.
 5. Lihat nominal yang harus dibayar.
 6. Upload bukti pembayaran.
 7. PO dibuat dan invoice ditampilkan.

@@ -40,7 +40,7 @@ app.innerHTML = `
           <select id="paymentPlan"><option value="DP">DP</option><option value="FULL">Full Payment</option></select>
         </label>
         <label>Metode Pembayaran
-          <select id="paymentMethod"><option value="QRIS">QRIS</option><option value="BCA_TRANSFER">Transfer Bank BCA</option></select>
+          <select id="paymentMethod"><option value="QRIS">QRIS</option><option value="BCA_TRANSFER">Transfer Bank BCA Blue</option></select>
         </label>
         <div id="paymentInfo" class="payment-box"></div>
         <label>Bukti Pembayaran<input id="paymentProofFile" type="file" required accept="image/png,image/jpeg,image/webp,application/pdf"></label>
@@ -254,7 +254,7 @@ function renderInvoice(order) {
       <div><span>Dibayar</span><strong>${formatRupiah(order.paid_amount)}</strong></div>
       <div class="grand"><span>Sisa Pembayaran</span><strong>${formatRupiah(order.remaining_amount)}</strong></div></div>
     <div class="notice"><strong>Rencana:</strong> ${escapeHtml(order.payment_plan==="FULL"?"Full Payment":`DP (${settings.dp_percentage||50}%)`)}<br>
-      <strong>Metode:</strong> ${escapeHtml(order.payment_method==="QRIS"?"QRIS":"Transfer Bank BCA")}<br>
+      <strong>Metode:</strong> ${escapeHtml(order.payment_method==="QRIS"?"QRIS":"Transfer Bank BCA Blue")}<br>
       <strong>Bukti pembayaran:</strong> ${order.proof_uploaded ? "✓ Berhasil diunggah" : "⚠ Belum berhasil diunggah"}</div>`;
   $("invoiceSection").classList.remove("hidden");
   $("invoiceSection").scrollIntoView({behavior:"smooth"});

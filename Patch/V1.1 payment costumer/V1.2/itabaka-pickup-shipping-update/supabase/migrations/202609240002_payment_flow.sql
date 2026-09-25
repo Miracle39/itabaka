@@ -222,7 +222,7 @@ begin
     customer_email,
     customer_address,
     customer_phone,
-    pickup_method,
+    delivery_method,
     notes,
     payment_status,
     payment_plan,

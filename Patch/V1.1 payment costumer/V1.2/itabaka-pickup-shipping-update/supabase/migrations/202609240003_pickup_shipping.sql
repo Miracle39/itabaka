@@ -145,7 +145,7 @@ begin
     id, invoice_no,
     customer_name, customer_contact, customer_email,
     customer_address, customer_phone,
-    pickup_method, notes,
+    delivery_method, notes,
     payment_status, delivery_method,
     payment_plan, payment_method,
     payment_amount_due, paid_amount, proof_token
