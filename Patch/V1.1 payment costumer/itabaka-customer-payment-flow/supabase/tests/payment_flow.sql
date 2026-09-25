@@ -1,0 +1,7 @@
+-- Checklist:
+-- 1. Customer dapat memilih DP/FULL.
+-- 2. Customer dapat memilih QRIS/BCA_TRANSFER.
+-- 3. Customer dapat upload PNG/JPG/WEBP/PDF <= 5 MB.
+-- 4. Anon tidak dapat SELECT orders/order_items.
+-- 5. Admin dapat membaca payment-proofs melalui signed URL.
+-- 6. Non-admin tidak dapat membaca payment-proofs.

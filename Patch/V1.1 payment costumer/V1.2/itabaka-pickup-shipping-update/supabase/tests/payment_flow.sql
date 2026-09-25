@@ -1,0 +1,16 @@
+-- Manual smoke checklist for the payment flow.
+-- Run after applying 202609230001_initial_schema.sql and 202609240002_payment_flow.sql.
+--
+-- Customer flow:
+-- 1. Public SELECT site_settings succeeds.
+-- 2. Customer can choose DP or FULL.
+-- 3. Customer can choose QRIS or BCA_TRANSFER.
+-- 4. create_public_order creates payment_status='DP' and paid_amount=0.
+-- 5. payment_amount_due is DP percentage or total for FULL.
+-- 6. payment proof object must match orders/<order_id>/<proof_token>.<ext>.
+-- 7. attach_payment_proof links the proof only when order id + proof token match.
+--
+-- Admin flow:
+-- 8. Admin can SELECT orders/order_items.
+-- 9. Admin can UPDATE payment_status and paid_amount.
+-- 10. Admin can SELECT private payment-proofs storage objects.
