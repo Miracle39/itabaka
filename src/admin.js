@@ -90,8 +90,8 @@ function shell(session) {
           </a>
           <nav class="main-nav">
             ${nav("products","Produk")}
-            ${nav("merchandise","Merchandise")}
-            ${nav("apparel","Kaos / Jaket")}
+            ${nav("merchandise","List Order Merchandise")}
+            ${nav("apparel","List Order Apparels")}
             ${nav("settings","Pengaturan")}
           </nav>
           <div class="header-actions">
@@ -377,7 +377,7 @@ function renderOrdersPage(mode) {
     <section class="page-title-row">
       <div>
         <div class="kicker">${isApparel ? "KAOS / JAKET" : "MERCHANDISE"}</div>
-        <h1>${isApparel ? "Order Kaos / Jaket" : "Order Merchandise"}</h1>
+        <h1>${isApparel ? "List Order Apparels" : "List Order Merchandise"}</h1>
         <p class="muted">${isApparel ? "Order apparel lengkap dengan ukuran." : "Daftar order merchandise yang masuk."}</p>
       </div>
       <div class="page-count">${data.length} order</div>
