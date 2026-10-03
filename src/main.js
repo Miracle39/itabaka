@@ -56,7 +56,7 @@ app.innerHTML = `
     <div id="invoice" class="invoice card"></div>
   </section>
 </main>
-<footer class="footer">Circle Itabaka · Development build</footer>`;
+<footer class="footer">  F1ug3l devs · Itabaka 2026™ </footer>`;
 
 const $ = id => document.getElementById(id);
 const total = () => cart.reduce((s,i) => s + Number(i.price) * i.qty, 0);
