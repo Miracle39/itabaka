@@ -40,7 +40,7 @@ app.innerHTML = `
           <select id="paymentPlan"><option value="DP">DP</option><option value="FULL">Full Payment</option></select>
         </label>
         <label>Metode Pembayaran
-          <select id="paymentMethod"><option value="QRIS">QRIS</option><option value="BCA_TRANSFER">Transfer Bank BCA Blue</option></select>
+          <select id="paymentMethod"><option value="QRIS">QRIS</option><option value="BCA_TRANSFER">Transfer Bank BCA</option></select>
         </label>
         <div id="paymentInfo" class="payment-box"></div>
         <label>Bukti Pembayaran<input id="paymentProofFile" type="file" required accept="image/png,image/jpeg,image/webp,application/pdf"></label>
@@ -92,7 +92,7 @@ async function loadSettings() {
 }
 
 async function loadProducts() {
-  const { data, error } = await supabase.from("products").select("id,code,name,description,price,image_url,stock").eq("active",true).order("sort_order").order("name");
+  const { data, error } = await supabase.from("products").select("id,code,name,description,price,image_url,stock,category,available_sizes").eq("active",true).order("sort_order").order("name");
   if (error) return showNotice("Produk gagal dimuat: " + error.message, "error");
   products = data || [];
   renderProducts();
@@ -103,49 +103,108 @@ function renderProducts() {
     <article class="product-card">
       <div class="product-image">${p.image_url ? `<img src="${escapeHtml(p.image_url)}" alt="${escapeHtml(p.name)}">` : "IMAGE"}</div>
       <div class="product-body">
-        <span class="product-code">${escapeHtml(p.code)}</span><h3>${escapeHtml(p.name)}</h3>
-        <p class="muted">${escapeHtml(p.description)}</p><div class="price">${formatRupiah(p.price)}</div>
+        <span class="product-code">${escapeHtml(p.code)}</span>
+        <h3>${escapeHtml(p.name)}</h3>
+        <p class="muted">${escapeHtml(p.description || "")}</p>
+        <div class="price">${formatRupiah(p.price)}</div>
         <p class="muted">${p.stock === null ? "Stok tidak dibatasi" : `Stok: ${p.stock}`}</p>
-        <button class="primary full" type="button" data-add="${p.id}" ${p.stock===0 ? "disabled":""}>Tambah</button>
+        ${p.category === "TSHIRT" || p.category === "JACKET" ? `
+          <label class="size-picker">Ukuran
+            <select data-size="${p.id}">
+              ${(p.available_sizes || []).length
+                ? (p.available_sizes || []).map(size => `<option value="${escapeHtml(size)}">${escapeHtml(size)}</option>`).join("")
+                : `<option value="">Belum ada ukuran</option>`}
+            </select>
+          </label>` : ""}
+        <button class="primary full" type="button" data-add="${p.id}"
+          ${(p.stock === 0 || ((p.category === "TSHIRT" || p.category === "JACKET") && !(p.available_sizes || []).length)) ? "disabled":""}>
+          Tambah
+        </button>
       </div>
     </article>`).join("") : '<div class="card form-card"><strong>Belum ada produk aktif.</strong></div>';
 
-  document.querySelectorAll("[data-add]").forEach(b => b.onclick = () => addToCart(b.dataset.add));
+  document.querySelectorAll("[data-add]").forEach(b => {
+    b.onclick = () => {
+      const p = products.find(x => x.id === b.dataset.add);
+      const size = (p?.category === "TSHIRT" || p?.category === "JACKET")
+        ? document.querySelector(`[data-size="${p.id}"]`)?.value || null
+        : null;
+      addToCart(b.dataset.add, size);
+    };
+  });
 }
 
-function addToCart(id) {
+function addToCart(id, size = null) {
   const p = products.find(x => x.id === id);
   if (!p) return;
-  const item = cart.find(x => x.id === id);
+
+  const isApparel = p.category === "TSHIRT" || p.category === "JACKET";
+  if (isApparel && !size) return showNotice("Pilih ukuran terlebih dahulu.", "error");
+
+  const cartKey = `${id}__${size || ""}`;
+  const item = cart.find(x => x.cartKey === cartKey);
   const next = (item?.qty || 0) + 1;
-  if (p.stock !== null && next > p.stock) return showNotice("Jumlah melebihi stok.", "error");
-  if (item) item.qty = next; else cart.push({...p, qty:1});
-  renderSummary(); renderPaymentInfo();
+
+  if (p.stock !== null && next > p.stock) {
+    return showNotice("Jumlah melebihi stok.", "error");
+  }
+
+  if (item) {
+    item.qty = next;
+  } else {
+    cart.push({...p, qty:1, size, cartKey});
+  }
+
+  renderSummary();
+  renderPaymentInfo();
   $("checkout").scrollIntoView({behavior:"smooth"});
 }
 
-function changeQty(id, delta) {
-  const item = cart.find(x => x.id === id); if (!item) return;
+function changeQty(cartKey, delta) {
+  const item = cart.find(x => x.cartKey === cartKey);
+  if (!item) return;
+
   item.qty += delta;
-  if (item.qty <= 0) cart = cart.filter(x => x.id !== id);
-  else {
-    const p = products.find(x => x.id === id);
+
+  if (item.qty <= 0) {
+    cart = cart.filter(x => x.cartKey !== cartKey);
+  } else {
+    const p = products.find(x => x.id === item.id);
     if (p?.stock !== null && item.qty > p.stock) item.qty = p.stock;
   }
-  renderSummary(); renderPaymentInfo();
+
+  renderSummary();
+  renderPaymentInfo();
 }
 
 function renderSummary() {
   $("cartCount").textContent = cart.reduce((s,i)=>s+i.qty,0);
   $("grandTotal").textContent = formatRupiah(total());
   $("paymentDue").textContent = formatRupiah(paymentDue());
+
   $("summaryItems").innerHTML = cart.length ? cart.map(i => `
-    <div class="summary-line"><div><strong>${escapeHtml(i.name)}</strong>
-      <div class="quantity-controls"><button type="button" data-minus="${i.id}">−</button><span>${i.qty}</span><button type="button" data-plus="${i.id}">+</button><button class="remove" type="button" data-remove="${i.id}">Hapus</button></div>
-    </div><strong>${formatRupiah(i.price*i.qty)}</strong></div>`).join("") : '<p class="muted">Belum ada produk.</p>';
-  document.querySelectorAll("[data-minus]").forEach(b=>b.onclick=()=>changeQty(b.dataset.minus,-1));
-  document.querySelectorAll("[data-plus]").forEach(b=>b.onclick=()=>changeQty(b.dataset.plus,1));
-  document.querySelectorAll("[data-remove]").forEach(b=>b.onclick=()=>{cart=cart.filter(x=>x.id!==b.dataset.remove);renderSummary();renderPaymentInfo();});
+    <div class="summary-line">
+      <div>
+        <strong>${escapeHtml(i.name)}</strong>
+        ${i.size ? `<div class="muted small">Ukuran: ${escapeHtml(i.size)}</div>` : ""}
+        <div class="quantity-controls">
+          <button type="button" data-minus="${encodeURIComponent(i.cartKey)}">−</button>
+          <span>${i.qty}</span>
+          <button type="button" data-plus="${encodeURIComponent(i.cartKey)}">+</button>
+          <button class="remove" type="button" data-remove="${encodeURIComponent(i.cartKey)}">Hapus</button>
+        </div>
+      </div>
+      <strong>${formatRupiah(i.price*i.qty)}</strong>
+    </div>`).join("") : '<p class="muted">Belum ada produk.</p>';
+
+  document.querySelectorAll("[data-minus]").forEach(b=>b.onclick=()=>changeQty(decodeURIComponent(b.dataset.minus),-1));
+  document.querySelectorAll("[data-plus]").forEach(b=>b.onclick=()=>changeQty(decodeURIComponent(b.dataset.plus),1));
+  document.querySelectorAll("[data-remove]").forEach(b=>b.onclick=()=>{
+    const key = decodeURIComponent(b.dataset.remove);
+    cart=cart.filter(x=>x.cartKey!==key);
+    renderSummary();
+    renderPaymentInfo();
+  });
 }
 
 function renderPaymentInfo() {
@@ -213,7 +272,7 @@ async function submitOrder(e) {
     p_delivery_method:deliveryMethod,
     p_payment_plan:$("paymentPlan").value,
     p_payment_method:$("paymentMethod").value,
-    p_items:cart.map(i=>({product_id:i.id,quantity:i.qty}))
+    p_items:cart.map(i=>({product_id:i.id,quantity:i.qty,size:i.size || null}))
   });
 
   if (error) {
@@ -248,13 +307,13 @@ function renderInvoice(order) {
     <div class="customer-grid"><p><strong>Pemesan</strong><br>${escapeHtml(order.customer_name)}<br>${escapeHtml(order.customer_email)}<br>${escapeHtml(order.customer_phone)}</p>
       <p><strong>Pengambilan / Pengiriman</strong><br>${order.delivery_method === "SHIP_TO_ADDRESS" ? "Dikirim ke Alamat" : "Ambil di Booth CF24"}${order.delivery_method === "SHIP_TO_ADDRESS" && order.customer_address ? `<br>${escapeHtml(order.customer_address)}` : ""}</p></div>
     <table class="table"><thead><tr><th>Produk</th><th>Qty</th><th>Harga</th><th class="right">Subtotal</th></tr></thead><tbody>
-      ${(order.items||[]).map(i=>`<tr><td>${escapeHtml(i.name)}</td><td>${i.quantity}</td><td>${formatRupiah(i.unit_price)}</td><td class="right">${formatRupiah(i.subtotal)}</td></tr>`).join("")}</tbody></table>
+      ${(order.items||[]).map(i=>`<tr><td>${escapeHtml(i.name)}${i.size ? `<div class="muted small">Ukuran: ${escapeHtml(i.size)}</div>` : ""}</td><td>${i.quantity}</td><td>${formatRupiah(i.unit_price)}</td><td class="right">${formatRupiah(i.subtotal)}</td></tr>`).join("")}</tbody></table>
     <div class="invoice-total"><div><span>Total Pesanan</span><strong>${formatRupiah(order.total_amount)}</strong></div>
       <div><span>Bayar Sekarang</span><strong>${formatRupiah(order.payment_amount_due)}</strong></div>
       <div><span>Dibayar</span><strong>${formatRupiah(order.paid_amount)}</strong></div>
       <div class="grand"><span>Sisa Pembayaran</span><strong>${formatRupiah(order.remaining_amount)}</strong></div></div>
     <div class="notice"><strong>Rencana:</strong> ${escapeHtml(order.payment_plan==="FULL"?"Full Payment":`DP (${settings.dp_percentage||50}%)`)}<br>
-      <strong>Metode:</strong> ${escapeHtml(order.payment_method==="QRIS"?"QRIS":"Transfer Bank BCA Blue")}<br>
+      <strong>Metode:</strong> ${escapeHtml(order.payment_method==="QRIS"?"QRIS":"Transfer Bank BCA")}<br>
       <strong>Bukti pembayaran:</strong> ${order.proof_uploaded ? "✓ Berhasil diunggah" : "⚠ Belum berhasil diunggah"}</div>`;
   $("invoiceSection").classList.remove("hidden");
   $("invoiceSection").scrollIntoView({behavior:"smooth"});
