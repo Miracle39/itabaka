@@ -60,7 +60,7 @@ button{
 .section{margin:70px auto}.section-head,.invoice-actions{display:flex;justify-content:space-between;align-items:center;gap:15px}.section h2{font-size:32px;margin:5px 0 20px}
 .grid{
     display:grid;
-    grid-template-columns:repeat(3,1fr);
+    grid-template-columns:repeat(4,1fr);
     gap:24px;
 }
 .card,.product-card{
