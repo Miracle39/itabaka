@@ -593,8 +593,8 @@ function renderSettingsPage() {
         <div class="panel-head"><div><h2>Pembayaran</h2><p class="muted">Nominal DP dan rekening transfer.</p></div></div>
         <div class="stack">
           <label>Persentase DP<input id="sDp" type="number" min="1" max="99" required></label>
-          <label>Nama Pemilik Rekening BCA<input id="sBcaName"></label>
-          <label>Nomor Rekening BCA<input id="sBcaNumber"></label>
+          <label>Nama Pemilik Rekening<input id="sBcaName"></label>
+          <label>Nomor Rekening<input id="sBcaNumber"></label>
         </div>
       </section>
 

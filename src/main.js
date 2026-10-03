@@ -40,7 +40,7 @@ app.innerHTML = `
           <select id="paymentPlan"><option value="DP">DP</option><option value="FULL">Full Payment</option></select>
         </label>
         <label>Metode Pembayaran
-          <select id="paymentMethod"><option value="QRIS">QRIS</option><option value="BCA_TRANSFER">Transfer Bank BCA</option></select>
+          <select id="paymentMethod"><option value="QRIS">QRIS</option><option value="BCA_TRANSFER">Transfer Blu by BCA Digital</option></select>
         </label>
         <div id="paymentInfo" class="payment-box"></div>
         <label>Bukti Pembayaran<input id="paymentProofFile" type="file" required accept="image/png,image/jpeg,image/webp,application/pdf"></label>
@@ -216,7 +216,7 @@ function renderPaymentInfo() {
       <p class="small">Setelah membayar, upload bukti pembayaran di bawah.</p>`;
   } else {
     $("paymentInfo").innerHTML = `<strong>${escapeHtml(planText)}</strong><p class="small">Bayar sekarang: <strong>${formatRupiah(due)}</strong></p>
-      <p class="small">Bank: <strong>BCA</strong><br>Atas nama: <strong>${escapeHtml(settings.bca_account_name || "Belum diatur")}</strong><br>No. rekening: <strong>${escapeHtml(settings.bca_account_number || "Belum diatur")}</strong></p>
+      <p class="small">Bank: <strong>Blu by BCA Digital</strong><br>Atas nama: <strong>${escapeHtml(settings.bca_account_name || "Belum diatur")}</strong><br>No. rekening: <strong>${escapeHtml(settings.bca_account_number || "Belum diatur")}</strong></p>
       <p class="small">Setelah transfer, upload bukti pembayaran di bawah.</p>`;
   }
 }
