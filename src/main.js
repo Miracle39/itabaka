@@ -1,10 +1,14 @@
 import "./styles.css";
 import { supabase } from "./lib/supabase.js";
-import { escapeHtml, formatDate, formatRupiah } from "./lib/format.js";
+import { escapeHtml, formatRupiah } from "./lib/format.js";
 
 const app = document.querySelector("#app");
+
+const CART_KEY = "itabaka_cart_v2";
+const SETTINGS_KEY = "itabaka_settings_v1";
+
 let products = [];
-let cart = [];
+let cart = readCart();
 let settings = {
   site_name: "Circle Itabaka",
   site_title: "Pre-Order CF24",
@@ -17,124 +21,56 @@ let settings = {
   dp_percentage: 50
 };
 
-app.innerHTML = `
-<header class="topbar">
-  <div><div class="brand" id="siteName">CIRCLE ITABAKA</div><div class="muted" id="siteTitle">Pre-Order CF24</div></div>
-  <button class="secondary" id="cartButton" type="button">Keranjang <span id="cartCount">0</span></button>
-</header>
-<main>
-  <section class="hero" id="hero">
-    <p class="eyebrow">PRE-ORDER</p>
-    <h1 id="heroTitle">Pesan merchandise Itabaka untuk CF24.</h1>
-    <p class="muted" id="heroDescription">Pilih produk, tentukan pembayaran, lalu upload bukti.</p>
-    <a class="primary" href="#products">Lihat Produk</a>
-  </section>
-
-  <section class="section container" id="products">
-    <div class="section-head">
-      <div>
-        <p class="eyebrow"></p>
-        <h2>Catalog Produk</h2>
-      </div>
-    </div>
-
-    <section class="catalog-section" id="apparelSection">
-      <div class="catalog-section-head">
-        <div>
-          <p class="eyebrow"></p>
-          <h3>Apparel</h3>
-          <p class="muted">All apparels Official Itabaka</p>
-        </div>
-      </div>
-      <div id="apparelGrid" class="grid"></div>
-    </section>
-
-    <section class="catalog-section" id="merchandiseSection">
-      <div class="catalog-section-head">
-        <div>
-          <p class="eyebrow"></p>
-          <h3>Merchandise</h3>
-          <p class="muted">All Itabaka Merch and Goods</p>
-        </div>
-      </div>
-      <div id="merchandiseGrid" class="grid"></div>
-    </section>
-  </section>
-
-  <section class="section container" id="checkout">
-    <p class="eyebrow">CHECKOUT</p>
-    <h2>Data Pemesan</h2>
-    <div id="notice"></div>
-    <div class="checkout-grid">
-      <form id="orderForm" class="card form-card">
-        <label>Nama<input id="customerName" required maxlength="120" autocomplete="name" placeholder="Nama lengkap"></label>
-        <label>Email<input id="customerEmail" required type="email" maxlength="160" autocomplete="email" placeholder="nama@email.com"></label>
-        <label>Nomor HP<input id="customerPhone" required maxlength="30" autocomplete="tel" placeholder="08xxxxxxxxxx"></label>
-        <label>Pilihan Pengambilan / Pengiriman
-          <select id="deliveryMethod">
-            <option value="BOOTH_CF24">Ambil di Booth CF24</option>
-            <option value="SHIP_TO_ADDRESS">Dikirim ke Alamat</option>
-          </select>
-        </label>
-        <div id="addressFieldWrap" class="hidden">
-          <label>Alamat Pengiriman<textarea id="customerAddress" maxlength="500" rows="4" autocomplete="street-address" placeholder="Alamat lengkap untuk pengiriman"></textarea></label>
-        </div>
-        <label>Rencana Pembayaran
-          <select id="paymentPlan"><option value="DP">DP</option><option value="FULL">Full Payment</option></select>
-        </label>
-        <label>Metode Pembayaran
-          <select id="paymentMethod"><option value="QRIS">QRIS</option><option value="BCA_TRANSFER">Transfer Blu by BCA Digital</option></select>
-        </label>
-        <div id="paymentInfo" class="payment-box"></div>
-        <label>Bukti Pembayaran<input id="paymentProofFile" type="file" required accept="image/png,image/jpeg,image/webp,application/pdf"></label>
-        <p class="muted small">PNG, JPG/JPEG, WEBP, atau PDF. Maksimal 5 MB.</p>
-        <div id="paymentProofPreview" class="file-preview"></div>
-        <button class="primary full" id="submitButton" type="submit">Buat Pesanan</button>
-      </form>
-      <aside class="card summary-card">
-        <h3>Ringkasan</h3>
-        <div id="summaryItems"></div>
-        <div class="total-row"><span>Total</span><strong id="grandTotal">Rp0</strong></div>
-        <div class="total-row"><span>Bayar sekarang</span><strong id="paymentDue">Rp0</strong></div>
-      </aside>
-    </div>
-  </section>
-
-  <section class="section container hidden" id="invoiceSection">
-    <div class="invoice-actions">
-      <div><p class="eyebrow">ORDER CREATED</p><h2>Invoice PO</h2></div>
-      <button id="printInvoice" class="secondary" type="button">Cetak / Simpan PDF</button>
-    </div>
-    <div id="invoice" class="invoice card"></div>
-  </section>
-</main>
-<footer class="footer">F1ug3l devs · Itabaka 2026™</footer>`;
-
 const $ = id => document.getElementById(id);
-const total = () => cart.reduce((s, i) => s + Number(i.price) * i.qty, 0);
+const isApparel = p => p?.category === "TSHIRT" || p?.category === "JACKET";
+const cartTotal = () => cart.reduce((sum, item) => sum + Number(item.price) * item.qty, 0);
 
-function paymentDue() {
-  const t = total();
-  return $("paymentPlan").value === "FULL"
-    ? t
-    : Math.min(t, Math.max(1, Math.ceil(t * Number(settings.dp_percentage || 50) / 100)));
+function readCart() {
+  try {
+    const raw = sessionStorage.getItem(CART_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
 }
 
-function showNotice(msg, type = "") {
-  $("notice").innerHTML = `<div class="notice ${type}">${escapeHtml(msg)}</div>`;
+function saveCart() {
+  sessionStorage.setItem(CART_KEY, JSON.stringify(cart));
+}
+
+function saveSettings() {
+  sessionStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+function showNotice(message, type = "") {
+  const box = $("notice");
+  if (!box) return;
+  box.innerHTML = `<div class="notice ${type}">${escapeHtml(message)}</div>`;
 }
 
 function applySettings() {
-  $("siteName").innerHTML = settings.logo_url
-    ? `<img src="${escapeHtml(settings.logo_url)}" alt="${escapeHtml(settings.site_name)}" style="height:38px;max-width:180px;object-fit:contain">`
-    : escapeHtml(settings.site_name || "Circle Itabaka");
-  $("siteTitle").textContent = settings.site_title || "Pre-Order";
-  $("heroTitle").textContent = settings.site_title || "Pre-Order CF24";
-  $("heroDescription").textContent = settings.site_description || "Pilih produk, tentukan pembayaran, lalu upload bukti.";
-  if (settings.banner_url) {
-    $("hero").style.backgroundImage = `linear-gradient(rgba(0,0,0,.55),rgba(0,0,0,.55)),url("${settings.banner_url.replaceAll('"', "%22")}")`;
-    $("hero").style.backgroundSize = "cover";
-    $("hero").style.backgroundPosition = "center";
+  const siteName = $("siteName");
+  const siteTitle = $("siteTitle");
+  const heroTitle = $("heroTitle");
+  const heroDescription = $("heroDescription");
+  const hero = $("hero");
+
+  if (siteName) {
+    siteName.innerHTML = settings.logo_url
+      ? `<img src="${escapeHtml(settings.logo_url)}" alt="${escapeHtml(settings.site_name || "Circle Itabaka")}" style="height:38px;max-width:180px;object-fit:contain">`
+      : escapeHtml(settings.site_name || "Circle Itabaka");
+  }
+  if (siteTitle) siteTitle.textContent = settings.site_title || "Pre-Order";
+  if (heroTitle) heroTitle.textContent = settings.site_title || "Pre-Order CF24";
+  if (heroDescription) {
+    heroDescription.textContent =
+      settings.site_description || "Pilih produk, masukkan ke keranjang, lalu checkout saat sudah siap.";
+  }
+  if (hero && settings.banner_url) {
+    hero.style.backgroundImage =
+      `linear-gradient(rgba(0,0,0,.55),rgba(0,0,0,.55)),url("${String(settings.banner_url).replaceAll('"','%22')}")`;
+    hero.style.backgroundSize = "cover";
+    hero.style.backgroundPosition = "center";
   }
 }
 
@@ -147,6 +83,7 @@ async function loadSettings() {
 
   if (!error && data) {
     settings = { ...settings, ...data };
+    saveSettings();
     applySettings();
   }
 }
@@ -159,349 +96,252 @@ async function loadProducts() {
     .order("sort_order")
     .order("name");
 
-  if (error) return showNotice("Produk gagal dimuat: " + error.message, "error");
+  if (error) {
+    showNotice("Produk gagal dimuat: " + error.message, "error");
+    return;
+  }
 
   products = data || [];
   renderProducts();
 }
 
-const APPAREL_CATEGORIES = new Set([
-  "TSHIRT",
-  "JACKET",
-  "HOODIE",
-  "SWEATSHIRT"
-]);
-
-function isApparel(product) {
-  return APPAREL_CATEGORIES.has(String(product.category || "").toUpperCase());
-}
-
-function renderProductCard(p) {
-  const apparel = isApparel(p);
-  return `
-    <article class="product-card">
-      <div class="product-image">${p.image_url ? `<img src="${escapeHtml(p.image_url)}" alt="${escapeHtml(p.name)}">` : "IMAGE"}</div>
-      <div class="product-body">
-        <h3>${escapeHtml(p.name)}</h3>
-        <p class="muted">${escapeHtml(p.description || "")}</p>
-        <div class="price">${formatRupiah(p.price)}</div>
-        <p class="muted">${p.stock === null ? "Stok tidak dibatasi" : `Stok: ${p.stock}`}</p>
-        ${apparel ? `
-          <label class="size-picker">Ukuran
-            <select data-size="${p.id}">
-              ${(p.available_sizes || []).length
-                ? (p.available_sizes || []).map(size => `<option value="${escapeHtml(size)}">${escapeHtml(size)}</option>`).join("")
-                : `<option value="">Belum ada ukuran</option>`}
-            </select>
-          </label>` : ""}
-        <button class="primary full" type="button" data-add="${p.id}"
-          ${(p.stock === 0 || (apparel && !(p.available_sizes || []).length)) ? "disabled" : ""}>
-          Tambah
-        </button>
-      </div>
-    </article>`;
-}
-
-function renderProductGrid(containerId, list) {
-  $(containerId).innerHTML = list.length
-    ? list.map(renderProductCard).join("")
-    : '<div class="card form-card"><strong>Belum ada produk aktif.</strong></div>';
-}
-
 function renderProducts() {
-  const apparelProducts = products.filter(isApparel);
-  const merchandiseProducts = products.filter(p => !isApparel(p));
+  const grid = $("productGrid");
+  if (!grid) return;
 
-  renderProductGrid("apparelGrid", apparelProducts);
-  renderProductGrid("merchandiseGrid", merchandiseProducts);
+  grid.innerHTML = products.length
+    ? products.map(product => `
+      <article class="product-card">
+        <div class="product-image">
+          ${product.image_url ? `<img src="${escapeHtml(product.image_url)}" alt="${escapeHtml(product.name)}">` : "IMAGE"}
+        </div>
+        <div class="product-body">
+          <h3>${escapeHtml(product.name)}</h3>
+          ${product.description ? `<p class="muted">${escapeHtml(product.description)}</p>` : ""}
+          <div class="price">${formatRupiah(product.price)}</div>
+          <p class="muted">${product.stock === null ? "Stok tidak dibatasi" : `Stok: ${product.stock}`}</p>
 
-  document.querySelectorAll("[data-add]").forEach(b => {
-    b.onclick = () => {
-      const p = products.find(x => x.id === b.dataset.add);
-      const size = isApparel(p)
-        ? document.querySelector(`[data-size="${p.id}"]`)?.value || null
+          ${isApparel(product) ? `
+            <label class="size-picker">
+              Ukuran
+              <select data-size="${product.id}">
+                ${(product.available_sizes || []).length
+                  ? product.available_sizes.map(size => `<option value="${escapeHtml(size)}">${escapeHtml(size)}</option>`).join("")
+                  : `<option value="">Belum ada ukuran</option>`}
+              </select>
+            </label>` : ""}
+
+          <button
+            class="primary full"
+            type="button"
+            data-add="${product.id}"
+            ${(product.stock === 0 || (isApparel(product) && !(product.available_sizes || []).length)) ? "disabled" : ""}
+          >Tambah ke Keranjang</button>
+        </div>
+      </article>
+    `).join("")
+    : `<div class="card form-card"><strong>Belum ada produk aktif.</strong></div>`;
+
+  document.querySelectorAll("[data-add]").forEach(button => {
+    button.addEventListener("click", () => {
+      const product = products.find(item => item.id === button.dataset.add);
+      const size = isApparel(product)
+        ? document.querySelector(`[data-size="${product.id}"]`)?.value || null
         : null;
-      addToCart(b.dataset.add, size);
-    };
+      addToCart(product, size);
+    });
   });
 }
 
-function addToCart(id, size = null) {
-  const p = products.find(x => x.id === id);
-  if (!p) return;
+function addToCart(product, size = null) {
+  if (!product) return;
+  if (isApparel(product) && !size) return showNotice("Pilih ukuran terlebih dahulu.", "error");
+  if (product.stock === 0) return showNotice("Produk sedang habis.", "error");
 
-  const apparel = isApparel(p);
-  if (apparel && !size) return showNotice("Pilih ukuran terlebih dahulu.", "error");
+  const cartKey = `${product.id}__${size || ""}`;
+  const existing = cart.find(item => item.cartKey === cartKey);
+  const nextQty = (existing?.qty || 0) + 1;
 
-  const cartKey = `${id}__${size || ""}`;
-  const item = cart.find(x => x.cartKey === cartKey);
-  const next = (item?.qty || 0) + 1;
-
-  if (p.stock !== null && next > p.stock) {
+  if (product.stock !== null && nextQty > product.stock) {
     return showNotice("Jumlah melebihi stok.", "error");
   }
 
-  if (item) {
-    item.qty = next;
+  if (existing) {
+    existing.qty = nextQty;
   } else {
-    cart.push({ ...p, qty: 1, size, cartKey });
+    cart.push({ ...product, qty: 1, size, cartKey });
   }
 
-  renderSummary();
-  renderPaymentInfo();
-  $("checkout").scrollIntoView({ behavior: "smooth" });
+  saveCart();
+  renderCart();
+  showNotice(`${product.name}${size ? ` (${size})` : ""} ditambahkan ke keranjang.`, "success");
 }
 
 function changeQty(cartKey, delta) {
-  const item = cart.find(x => x.cartKey === cartKey);
+  const item = cart.find(entry => entry.cartKey === cartKey);
   if (!item) return;
 
   item.qty += delta;
-
   if (item.qty <= 0) {
-    cart = cart.filter(x => x.cartKey !== cartKey);
+    cart = cart.filter(entry => entry.cartKey !== cartKey);
   } else {
-    const p = products.find(x => x.id === item.id);
-    if (p?.stock !== null && item.qty > p.stock) item.qty = p.stock;
+    const product = products.find(entry => entry.id === item.id);
+    if (product?.stock !== null && item.qty > product.stock) item.qty = product.stock;
   }
 
-  renderSummary();
-  renderPaymentInfo();
+  saveCart();
+  renderCart();
 }
 
-function renderSummary() {
-  $("cartCount").textContent = cart.reduce((s, i) => s + i.qty, 0);
-  $("grandTotal").textContent = formatRupiah(total());
-  $("paymentDue").textContent = formatRupiah(paymentDue());
+function removeFromCart(cartKey) {
+  cart = cart.filter(item => item.cartKey !== cartKey);
+  saveCart();
+  renderCart();
+}
 
-  $("summaryItems").innerHTML = cart.length
-    ? cart.map(i => `
-      <div class="summary-line">
-        <div>
-          <strong>${escapeHtml(i.name)}</strong>
-          ${i.size ? `<div class="muted small">Ukuran: ${escapeHtml(i.size)}</div>` : ""}
-          <div class="quantity-controls">
-            <button type="button" data-minus="${encodeURIComponent(i.cartKey)}">−</button>
-            <span>${i.qty}</span>
-            <button type="button" data-plus="${encodeURIComponent(i.cartKey)}">+</button>
-            <button class="remove" type="button" data-remove="${encodeURIComponent(i.cartKey)}">Hapus</button>
+function openCart() {
+  renderCart();
+  $("cartModal")?.classList.remove("hidden");
+  $("cartModal")?.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+}
+
+function closeCart() {
+  $("cartModal")?.classList.add("hidden");
+  $("cartModal")?.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("modal-open");
+}
+
+function renderCart() {
+  const count = cart.reduce((sum, item) => sum + item.qty, 0);
+  $("cartCount").textContent = String(count);
+  $("cartTotal").textContent = formatRupiah(cartTotal());
+  $("checkoutButton").disabled = !cart.length;
+
+  $("cartItems").innerHTML = cart.length
+    ? cart.map(item => `
+      <div class="cart-line">
+        <div class="cart-line-main">
+          <div class="cart-line-image">
+            ${item.image_url ? `<img src="${escapeHtml(item.image_url)}" alt="">` : ""}
+          </div>
+          <div>
+            <strong>${escapeHtml(item.name)}</strong>
+            ${item.size ? `<div class="muted small">Ukuran: ${escapeHtml(item.size)}</div>` : ""}
+            <div class="muted small">${formatRupiah(item.price)} / item</div>
           </div>
         </div>
-        <strong>${formatRupiah(i.price * i.qty)}</strong>
-      </div>`).join("")
-    : '<p class="muted">Belum ada produk.</p>';
+        <div class="cart-line-side">
+          <strong>${formatRupiah(item.price * item.qty)}</strong>
+          <div class="quantity-controls">
+            <button type="button" data-minus="${encodeURIComponent(item.cartKey)}">−</button>
+            <span>${item.qty}</span>
+            <button type="button" data-plus="${encodeURIComponent(item.cartKey)}">+</button>
+            <button class="remove" type="button" data-remove="${encodeURIComponent(item.cartKey)}">Hapus</button>
+          </div>
+        </div>
+      </div>
+    `).join("")
+    : `
+      <div class="empty-cart">
+        <strong>Keranjang masih kosong.</strong>
+        <p class="muted">Pilih produk terlebih dahulu, lalu buka keranjang untuk checkout.</p>
+        <button class="primary" type="button" id="emptyCartBrowse">Lihat Produk</button>
+      </div>
+    `;
 
-  document.querySelectorAll("[data-minus]").forEach(b => b.onclick = () => changeQty(decodeURIComponent(b.dataset.minus), -1));
-  document.querySelectorAll("[data-plus]").forEach(b => b.onclick = () => changeQty(decodeURIComponent(b.dataset.plus), 1));
-  document.querySelectorAll("[data-remove]").forEach(b => b.onclick = () => {
-    const key = decodeURIComponent(b.dataset.remove);
-    cart = cart.filter(x => x.cartKey !== key);
-    renderSummary();
-    renderPaymentInfo();
+  document.querySelectorAll("[data-minus]").forEach(button => {
+    button.onclick = () => changeQty(decodeURIComponent(button.dataset.minus), -1);
+  });
+  document.querySelectorAll("[data-plus]").forEach(button => {
+    button.onclick = () => changeQty(decodeURIComponent(button.dataset.plus), 1);
+  });
+  document.querySelectorAll("[data-remove]").forEach(button => {
+    button.onclick = () => removeFromCart(decodeURIComponent(button.dataset.remove));
+  });
+
+  $("emptyCartBrowse")?.addEventListener("click", () => {
+    closeCart();
+    $("products")?.scrollIntoView({ behavior: "smooth" });
   });
 }
 
-function renderPaymentInfo() {
-  const due = paymentDue();
-  const planText = $("paymentPlan").value === "FULL" ? "Full Payment" : `DP ${settings.dp_percentage || 50}%`;
-
-  if ($("paymentMethod").value === "QRIS") {
-    $("paymentInfo").innerHTML = `
-      <strong>${escapeHtml(planText)}</strong>
-      <p class="small">Bayar sekarang: <strong>${formatRupiah(due)}</strong></p>
-      ${settings.qris_image_url
-        ? `<img src="${escapeHtml(settings.qris_image_url)}" alt="QRIS">`
-        : '<p class="muted small">QRIS belum diatur admin.</p>'}
-      <p class="small">Setelah membayar, upload bukti pembayaran di bawah.</p>`;
-  } else {
-    $("paymentInfo").innerHTML = `
-      <strong>${escapeHtml(planText)}</strong>
-      <p class="small">Bayar sekarang: <strong>${formatRupiah(due)}</strong></p>
-      <p class="small">Bank: <strong>Blu by BCA Digital</strong><br>
-      Atas nama: <strong>${escapeHtml(settings.bca_account_name || "Belum diatur")}</strong><br>
-      No. rekening: <strong>${escapeHtml(settings.bca_account_number || "Belum diatur")}</strong></p>
-      <p class="small">Setelah transfer, upload bukti pembayaran di bawah.</p>`;
-  }
-}
-
-function previewProof() {
-  const file = $("paymentProofFile").files?.[0];
-  if (!file) return $("paymentProofPreview").innerHTML = "";
-  if (file.size > 5 * 1024 * 1024) {
-    return $("paymentProofPreview").innerHTML = `<div class="notice error">Maksimal 5 MB.</div>`;
-  }
-
-  if (file.type.startsWith("image/")) {
-    const url = URL.createObjectURL(file);
-    $("paymentProofPreview").innerHTML = `<img src="${url}" alt="Preview">`;
-  } else {
-    $("paymentProofPreview").innerHTML = `<div class="notice">Siap diupload: <strong>${escapeHtml(file.name)}</strong></div>`;
-  }
-}
-
-async function uploadProof(orderId, proofToken, file) {
-  const allowed = ["image/png", "image/jpeg", "image/webp", "application/pdf"];
-  if (!allowed.includes(file.type)) throw new Error("Format bukti pembayaran tidak didukung.");
-  if (file.size > 5 * 1024 * 1024) throw new Error("Ukuran bukti pembayaran maksimal 5 MB.");
-
-  const ext = file.type === "application/pdf"
-    ? "pdf"
-    : file.type === "image/png"
-      ? "png"
-      : file.type === "image/webp"
-        ? "webp"
-        : "jpg";
-
-  const path = `orders/${orderId}/${proofToken}.${ext}`;
-  const { error } = await supabase.storage
-    .from("payment-proofs")
-    .upload(path, file, { upsert: false, cacheControl: "3600", contentType: file.type });
-
-  if (error) throw error;
-  return path;
-}
-
-function syncDeliveryMethod() {
-  const shipping = $("deliveryMethod").value === "SHIP_TO_ADDRESS";
-  $("addressFieldWrap").classList.toggle("hidden", !shipping);
-  $("customerAddress").required = shipping;
-  if (!shipping) $("customerAddress").value = "";
-}
-
-async function submitOrder(e) {
-  e.preventDefault();
-  if (!cart.length) return showNotice("Tambahkan minimal satu produk.", "error");
-
-  const deliveryMethod = $("deliveryMethod").value;
-  const address = $("customerAddress").value.trim();
-
-  if (deliveryMethod === "SHIP_TO_ADDRESS" && !address) {
-    return showNotice("Alamat pengiriman wajib diisi.", "error");
-  }
-
-  const proof = $("paymentProofFile").files?.[0];
-  if (!proof) return showNotice("Bukti pembayaran wajib diunggah.", "error");
-
-  $("submitButton").disabled = true;
-  showNotice("Memproses pesanan...", "");
-
-  const { data, error } = await supabase.rpc("create_public_order", {
-    p_customer_name: $("customerName").value.trim(),
-    p_customer_email: $("customerEmail").value.trim(),
-    p_customer_address: deliveryMethod === "SHIP_TO_ADDRESS" ? address : null,
-    p_customer_phone: $("customerPhone").value.trim(),
-    p_delivery_method: deliveryMethod,
-    p_payment_plan: $("paymentPlan").value,
-    p_payment_method: $("paymentMethod").value,
-    p_items: cart.map(i => ({
-      product_id: i.id,
-      quantity: i.qty,
-      size: i.size || null
-    }))
-  });
-
-  if (error) {
-    $("submitButton").disabled = false;
-    return showNotice("PO gagal dibuat: " + error.message, "error");
-  }
-
-  try {
-    const proofPath = await uploadProof(data.id, data.proof_token, proof);
-    const { error: attachError } = await supabase.rpc("attach_payment_proof", {
-      p_order_id: data.id,
-      p_proof_token: data.proof_token,
-      p_proof_path: proofPath
-    });
-    if (attachError) throw attachError;
-  } catch (proofError) {
-    showNotice("PO sudah dibuat, tetapi bukti pembayaran gagal diupload: " + proofError.message, "error");
-    renderInvoice({ ...data, proof_uploaded: false });
-    $("submitButton").disabled = false;
+function goToCheckout() {
+  if (!cart.length) {
+    showNotice("Keranjang masih kosong. Tambahkan produk terlebih dahulu.", "error");
     return;
   }
 
-  renderInvoice({ ...data, proof_uploaded: true });
-  showNotice("PO dan bukti pembayaran berhasil dikirim.", "success");
-
-  cart = [];
-  $("orderForm").reset();
-  $("deliveryMethod").value = "BOOTH_CF24";
-  $("paymentPlan").value = "DP";
-  $("paymentMethod").value = "QRIS";
-  $("paymentProofPreview").innerHTML = "";
-
-  syncDeliveryMethod();
-  $("submitButton").disabled = false;
-  renderSummary();
-  renderPaymentInfo();
-  await loadProducts();
+  saveCart();
+  saveSettings();
+  window.location.href = "checkout.html";
 }
 
-function renderInvoice(order) {
-  $("invoice").innerHTML = `
-    <div class="invoice-head">
+app.innerHTML = `
+<header class="topbar">
+  <div class="brand-wrap">
+    <div class="brand" id="siteName">CIRCLE ITABAKA</div>
+    <div class="muted" id="siteTitle">Pre-Order CF24</div>
+  </div>
+  <button class="secondary cart-trigger" id="cartButton" type="button">
+    Keranjang <span id="cartCount">0</span>
+  </button>
+</header>
+
+<main>
+  <section class="hero" id="hero">
+    <p class="eyebrow">PRE-ORDER</p>
+    <h1 id="heroTitle">Pesan merchandise Itabaka untuk CF24.</h1>
+    <p class="muted" id="heroDescription">
+      Pilih produk, masukkan ke keranjang, lalu checkout saat sudah siap.
+    </p>
+    <a class="primary hero-button" href="#products">Lihat Produk</a>
+  </section>
+
+  <section class="section container" id="products">
+    <div class="section-head">
       <div>
-        ${settings.logo_url ? `<img src="${escapeHtml(settings.logo_url)}" alt="" style="height:46px;max-width:180px;object-fit:contain">` : ""}
-        <h2>${escapeHtml(settings.site_name || "Circle Itabaka")}</h2>
-        <p class="muted">${escapeHtml(settings.site_title || "Pre-Order CF24")}</p>
-      </div>
-      <div class="invoice-meta">
-        <strong>${escapeHtml(order.invoice_no)}</strong>
-        <span>${formatDate(order.created_at)}</span>
-        <span class="status dp">MENUNGGU VERIFIKASI</span>
+        <p class="eyebrow">CATALOG</p>
+        <h2>Produk</h2>
       </div>
     </div>
+    <div id="notice"></div>
+    <div id="productGrid" class="grid"></div>
+  </section>
+</main>
 
-    <div class="customer-grid">
-      <p><strong>Pemesan</strong><br>${escapeHtml(order.customer_name)}<br>${escapeHtml(order.customer_email)}<br>${escapeHtml(order.customer_phone)}</p>
-      <p><strong>Pengambilan / Pengiriman</strong><br>
-        ${order.delivery_method === "SHIP_TO_ADDRESS" ? "Dikirim ke Alamat" : "Ambil di Booth CF24"}
-        ${order.delivery_method === "SHIP_TO_ADDRESS" && order.customer_address ? `<br>${escapeHtml(order.customer_address)}` : ""}
-      </p>
+<div class="modal hidden" id="cartModal" aria-hidden="true">
+  <div class="modal-backdrop" data-close-cart="true"></div>
+  <div class="cart-modal-card" role="dialog" aria-modal="true" aria-labelledby="cartTitle">
+    <div class="modal-header">
+      <div>
+        <p class="eyebrow">CART</p>
+        <h2 id="cartTitle">Keranjang</h2>
+      </div>
+      <button class="icon-button" id="closeCart" type="button" aria-label="Tutup">×</button>
     </div>
-
-    <table class="table">
-      <thead><tr><th>Produk</th><th>Qty</th><th>Harga</th><th class="right">Subtotal</th></tr></thead>
-      <tbody>
-        ${(order.items || []).map(i => `
-          <tr>
-            <td>${escapeHtml(i.name)}${i.size ? `<div class="muted small">Ukuran: ${escapeHtml(i.size)}</div>` : ""}</td>
-            <td>${i.quantity}</td>
-            <td>${formatRupiah(i.unit_price)}</td>
-            <td class="right">${formatRupiah(i.subtotal)}</td>
-          </tr>`).join("")}
-      </tbody>
-    </table>
-
-    <div class="invoice-total">
-      <div><span>Total Pesanan</span><strong>${formatRupiah(order.total_amount)}</strong></div>
-      <div><span>Bayar Sekarang</span><strong>${formatRupiah(order.payment_amount_due)}</strong></div>
-      <div><span>Dibayar</span><strong>${formatRupiah(order.paid_amount)}</strong></div>
-      <div class="grand"><span>Sisa Pembayaran</span><strong>${formatRupiah(order.remaining_amount)}</strong></div>
+    <div id="cartItems" class="cart-items"></div>
+    <div class="cart-total"><span>Total</span><strong id="cartTotal">Rp0</strong></div>
+    <div class="cart-actions">
+      <button class="secondary" id="continueShopping" type="button">Lanjut Belanja</button>
+      <button class="primary" id="checkoutButton" type="button">Checkout →</button>
     </div>
+  </div>
+</div>
 
-    <div class="notice">
-      <strong>Rencana:</strong> ${escapeHtml(order.payment_plan === "FULL" ? "Full Payment" : `DP (${settings.dp_percentage || 50}%)`)}<br>
-      <strong>Metode:</strong> ${escapeHtml(order.payment_method === "QRIS" ? "QRIS" : "Transfer Bank BCA")}<br>
-      <strong>Bukti pembayaran:</strong> ${order.proof_uploaded ? "✓ Berhasil diunggah" : "⚠ Belum berhasil diunggah"}
-    </div>`;
+<footer class="footer">Circle Itabaka · Development build</footer>
+`;
 
-  $("invoiceSection").classList.remove("hidden");
-  $("invoiceSection").scrollIntoView({ behavior: "smooth" });
-}
-
-$("orderForm").addEventListener("submit", submitOrder);
-$("deliveryMethod").addEventListener("change", syncDeliveryMethod);
-$("paymentPlan").addEventListener("change", () => {
-  renderPaymentInfo();
-  renderSummary();
+$("cartButton").addEventListener("click", openCart);
+$("closeCart").addEventListener("click", closeCart);
+$("continueShopping").addEventListener("click", closeCart);
+$("checkoutButton").addEventListener("click", goToCheckout);
+$("cartModal").addEventListener("click", event => {
+  if (event.target.dataset.closeCart === "true") closeCart();
 });
-$("paymentMethod").addEventListener("change", renderPaymentInfo);
-$("paymentProofFile").addEventListener("change", previewProof);
-$("cartButton").addEventListener("click", () => $("checkout").scrollIntoView({ behavior: "smooth" }));
-$("printInvoice").addEventListener("click", () => window.print());
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && !$("cartModal").classList.contains("hidden")) closeCart();
+});
 
 await Promise.all([loadSettings(), loadProducts()]);
-syncDeliveryMethod();
-renderSummary();
-renderPaymentInfo();
+renderCart();
