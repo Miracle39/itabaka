@@ -52,10 +52,129 @@ body.modal-open{overflow:hidden}
   .checkout-brand{align-items:flex-end}
   .checkout-page{padding-top:30px}
 }
-@media print{
-  .invoice-page{padding-top:0!important}
-  .invoice-page .invoice{box-shadow:none}
-  .invoice-page .notice{display:none}
-  .invoice-page h1,.invoice-page .invoice-actions{display:none}
-  .topbar,.footer{display:none!important}
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  body {
+    color: #111 !important;
+  }
+
+  /* Yang tidak perlu dicetak */
+  .invoice-screen-only,
+  .topbar,
+  .footer,
+  .invoice-actions,
+  .invoice-warning {
+    display: none !important;
+  }
+
+  /* Area halaman invoice */
+  .invoice-page {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Invoice tetap terlihat saat print */
+  .invoice-page .invoice {
+    display: block !important;
+    visibility: visible !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 7mm !important;
+
+    background: #fff !important;
+    color: #111 !important;
+    border: 1px solid #ddd !important;
+    border-radius: 4mm !important;
+    box-shadow: none !important;
+  }
+
+  .invoice * {
+    visibility: visible !important;
+  }
+
+  .invoice-head {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: flex-start !important;
+  }
+
+  .invoice-brand-block {
+    display: flex !important;
+    align-items: center !important;
+  }
+
+  .invoice-meta {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-end !important;
+  }
+
+  .invoice-customer-grid {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  .invoice-table {
+    display: table !important;
+    width: 100% !important;
+  }
+
+  .invoice-table thead {
+    display: table-header-group !important;
+  }
+
+  .invoice-table tbody {
+    display: table-row-group !important;
+  }
+
+  .invoice-table tr {
+    display: table-row !important;
+  }
+
+  .invoice-table th,
+  .invoice-table td {
+    display: table-cell !important;
+  }
+
+  .invoice-bottom {
+    display: grid !important;
+    grid-template-columns: 1fr 280px !important;
+    gap: 14px !important;
+  }
+
+  .invoice-payment-box,
+  .invoice-total {
+    display: block !important;
+    visibility: visible !important;
+  }
+
+  .invoice-payment-box {
+    background: #f2f2f2 !important;
+  }
+
+  .invoice-product-name,
+  .invoice-size,
+  .invoice-label,
+  .invoice-brand-name,
+  .invoice-subtitle,
+  .invoice-meta,
+  .invoice-total,
+  .invoice-payment-box {
+    visibility: visible !important;
+  }
 }

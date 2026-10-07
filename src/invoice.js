@@ -153,6 +153,71 @@ function renderInvoice({ order, items }) {
     <footer class="footer">Circle Itabaka · Development build</footer>
   `;
 
-  $("printInvoice").addEventListener("click", () => window.print());
+document.getElementById("printInvoice")?.addEventListener("click", () => {
+  printInvoiceDocument();
+});
+
+function printInvoiceDocument() {
+  const invoice = document.getElementById("invoice");
+  if (!invoice) return;
+
+  const printWindow = window.open("", "_blank", "width=900,height=900");
+  if (!printWindow) {
+    alert("Popup cetak diblokir browser. Izinkan pop-up untuk localhost lalu coba lagi.");
+    return;
+  }
+
+  const invoiceHtml = invoice.outerHTML;
+
+  printWindow.document.open();
+  printWindow.document.write(`<!doctype html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>${escapeHtml(order.invoice_no || "Invoice Circle Itabaka")}</title>
+<style>
+@page { size: A4 portrait; margin: 10mm; }
+* { box-sizing: border-box; }
+html, body { margin:0; padding:0; background:#fff; color:#111; font-family:Arial,Helvetica,sans-serif; font-size:12px; line-height:1.45; }
+.invoice { width:100%; max-width:190mm; margin:0 auto; padding:0; background:#fff; border:1px solid #d9d9d9; border-radius:0; box-shadow:none; }
+.invoice-head { display:flex; justify-content:space-between; gap:20px; padding:0 0 14px; border-bottom:2px solid #111; }
+.invoice-brand-name { font-size:20px; font-weight:800; margin-bottom:3px; }
+.invoice-head h2 { margin:0; font-size:16px; }
+.invoice-head p { margin:3px 0 0; color:#666; }
+.invoice-meta { display:flex; flex-direction:column; align-items:flex-end; gap:2px; text-align:right; }
+.invoice-meta strong { font-size:14px; }
+.status { display:inline-block; margin-top:5px; padding:4px 8px; border:1px solid #999; border-radius:999px; font-size:9px; font-weight:700; }
+.customer-grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; padding:14px 0; border-bottom:1px solid #ddd; }
+.customer-grid p { margin:0; }
+.table { width:100%; border-collapse:collapse; margin-top:12px; }
+.table th,.table td { padding:7px 6px; border-bottom:1px solid #ddd; text-align:left; vertical-align:top; }
+.table th { font-size:10px; text-transform:uppercase; letter-spacing:.4px; border-bottom:2px solid #111; }
+.table th.right,.table td.right { text-align:right; }
+.small { font-size:10px; }
+.muted { color:#666; }
+.invoice-total { width:62%; margin:14px 0 0 auto; border-top:1px solid #ccc; }
+.invoice-total > div { display:flex; justify-content:space-between; gap:20px; padding:5px 0; border-bottom:1px solid #eee; }
+.invoice-total .grand { padding-top:8px; border-top:2px solid #111; border-bottom:0; font-size:14px; font-weight:800; }
+.notice { margin-top:14px; padding:9px 11px; border:1px solid #ccc; border-radius:6px; background:#fafafa; }
+@media print {
+  html,body { width:210mm; min-height:297mm; }
+  .invoice,.table tr,.customer-grid,.invoice-total,.notice { break-inside:avoid; page-break-inside:avoid; }
+}
+</style>
+</head>
+<body>${invoiceHtml}</body>
+</html>`);
+
+  printWindow.document.close();
+  printWindow.focus();
+
+  const doPrint = () => {
+    printWindow.focus();
+    printWindow.print();
+    printWindow.addEventListener("afterprint", () => printWindow.close(), { once: true });
+  };
+
+  setTimeout(doPrint, 150);
+}
   sessionStorage.removeItem("itabaka_invoice_warning_v1");
 }
