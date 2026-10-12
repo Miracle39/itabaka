@@ -69,6 +69,10 @@ async function refreshSettings() {
 
 function renderShell() {
   app.innerHTML = `
+  <style>
+    .field-feedback{display:block;color:#b91c1c;font-size:12px;font-weight:600;line-height:1.4;margin:5px 0 0}
+    .field-feedback.hidden{display:none!important}
+  </style>
   <header class="topbar">
     <a class="brand-link" href="index.html">← Kembali ke Produk</a>
     <div class="checkout-brand">
@@ -103,9 +107,15 @@ function renderShell() {
               <div><h2>Data Pemesan</h2><p class="muted small">Data ini dipakai untuk konfirmasi dan invoice.</p></div>
             </div>
 
-            <label>Nama<input id="customerName" maxlength="120" autocomplete="name" placeholder="Nama lengkap"></label>
+            <label>Nama
+              <input id="customerName" type="text" required maxlength="120" autocomplete="name" placeholder="Nama lengkap" aria-describedby="customerNameFeedback">
+              <small id="customerNameFeedback" class="field-feedback hidden" role="alert" aria-live="polite">Nama hanya boleh berisi huruf dan spasi.</small>
+            </label>
             <label>Email<input id="customerEmail" type="email" maxlength="160" autocomplete="email" placeholder="nama@email.com"></label>
-            <label>Nomor HP<input id="customerPhone" maxlength="30" autocomplete="tel" placeholder="08xxxxxxxxxx"></label>
+            <label>Nomor HP
+              <input id="customerPhone" type="tel" inputmode="numeric" pattern="[0-9]{8,15}" required maxlength="15" autocomplete="tel" placeholder="08xxxxxxxxxx" aria-describedby="customerPhoneFeedback">
+              <small id="customerPhoneFeedback" class="field-feedback hidden" role="alert" aria-live="polite">Nomor HP hanya boleh berisi angka.</small>
+            </label>
             <label>
               Pilihan Pengambilan / Pengiriman
               <select id="deliveryMethod">
@@ -150,7 +160,7 @@ function renderShell() {
             <label>Bukti Pembayaran
               <input id="paymentProofFile" type="file" accept="image/png,image/jpeg,image/webp,application/pdf">
             </label>
-            <p class="muted small">PNG, JPG/JPEG, WEBP, atau PDF. Maksimal 5 MB.</p>
+            <p class="muted small">PNG, JPG/JPEG, WEBP, atau PDF. Maksimal 2 MB.</p>
             <div id="paymentProofPreview" class="file-preview"></div>
 
             <div class="step-actions between">
@@ -160,8 +170,7 @@ function renderShell() {
           </section>
         </form>
 
-        <aside id="checkoutSummary"
-       class="card summary-card checkout-summary-card hidden">
+        <aside id="checkoutSummary" class="card summary-card checkout-summary-card hidden">
           <div class="summary-header"><h3>Ringkasan Pesanan</h3></div>
           <div id="summaryItems"></div>
           <div class="total-row"><span>Total</span><strong id="grandTotal">Rp0</strong></div>
@@ -238,12 +247,19 @@ function setStep(step) {
   });
 
   const checkoutSummary = $("checkoutSummary");
-if (checkoutSummary) {
-  checkoutSummary.classList.toggle("hidden", step !== 2);
-}
+  if (checkoutSummary) {
+    checkoutSummary.classList.toggle("hidden", step !== 2);
+  }
 
   if (step === 2) renderPaymentInfo();
   window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function setFieldFeedback(id, message) {
+  const feedback = $(id);
+  if (!feedback) return;
+  feedback.textContent = message;
+  feedback.classList.toggle("hidden", !message);
 }
 
 function validateCustomerData() {
@@ -253,10 +269,27 @@ function validateCustomerData() {
   const method = $("deliveryMethod").value;
   const address = $("customerAddress").value.trim();
 
-  if (!name) return "Nama wajib diisi.";
+  if (!name) {
+    setFieldFeedback("customerNameFeedback", "Nama wajib diisi.");
+    return "Nama wajib diisi.";
+  }
+  if (!/^[\p{L}\p{M} ]+$/u.test(name)) {
+    setFieldFeedback("customerNameFeedback", "Nama hanya boleh berisi huruf dan spasi.");
+    return "Nama hanya boleh berisi huruf dan spasi.";
+  }
+  setFieldFeedback("customerNameFeedback", "");
+
   if (!email) return "Email wajib diisi.";
   if (!/^\S+@\S+\.\S+$/.test(email)) return "Format email belum benar.";
-  if (!phone) return "Nomor HP wajib diisi.";
+  if (!phone) {
+    setFieldFeedback("customerPhoneFeedback", "Nomor HP wajib diisi.");
+    return "Nomor HP wajib diisi.";
+  }
+  if (!/^[0-9]{8,15}$/.test(phone)) {
+    setFieldFeedback("customerPhoneFeedback", "Nomor HP harus 8–15 digit angka.");
+    return "Nomor HP harus 8–15 digit angka.";
+  }
+  setFieldFeedback("customerPhoneFeedback", "");
   if (method === "SHIP_TO_ADDRESS" && !address) return "Alamat pengiriman wajib diisi.";
   return "";
 }
@@ -305,8 +338,9 @@ function previewProof() {
     return;
   }
 
-  if (file.size > 5 * 1024 * 1024) {
-    $("paymentProofPreview").innerHTML = `<div class="notice error">Ukuran file maksimal 5 MB.</div>`;
+  if (file.size > 2 * 1024 * 1024) {
+    $("paymentProofPreview").innerHTML = `<div class="notice error">Ukuran file maksimal 2 MB.</div>`;
+    $("paymentProofFile").value = "";
     return;
   }
 
@@ -322,7 +356,7 @@ function previewProof() {
 async function uploadProof(orderId, proofToken, file) {
   const allowed = ["image/png", "image/jpeg", "image/webp", "application/pdf"];
   if (!allowed.includes(file.type)) throw new Error("Format bukti pembayaran tidak didukung.");
-  if (file.size > 5 * 1024 * 1024) throw new Error("Ukuran bukti pembayaran maksimal 5 MB.");
+  if (file.size > 2 * 1024 * 1024) throw new Error("Ukuran bukti pembayaran maksimal 2 MB.");
 
   const ext =
     file.type === "application/pdf" ? "pdf" :
@@ -361,6 +395,18 @@ async function submitOrder(event) {
   const proof = $("paymentProofFile").files?.[0];
   if (!proof) {
     showNotice("Bukti pembayaran wajib diunggah.", "error");
+    return;
+  }
+
+  const allowedProofTypes = ["image/png", "image/jpeg", "image/webp", "application/pdf"];
+  if (!allowedProofTypes.includes(proof.type)) {
+    showNotice("Format bukti pembayaran harus PNG, JPG/JPEG, WEBP, atau PDF.", "error");
+    return;
+  }
+  if (proof.size > 2 * 1024 * 1024) {
+    showNotice("Ukuran bukti pembayaran maksimal 2 MB. Pilih file yang lebih kecil.", "error");
+    $("paymentProofFile").value = "";
+    $("paymentProofPreview").innerHTML = "";
     return;
   }
 
@@ -434,8 +480,52 @@ function bindEvents() {
   $("paymentMethod").addEventListener("change", () => { saveDraft(); renderPaymentInfo(); });
   $("paymentProofFile").addEventListener("change", previewProof);
 
-  ["customerName", "customerEmail", "customerPhone", "customerAddress"].forEach(id => {
+  ["customerEmail", "customerAddress"].forEach(id => {
     $(id).addEventListener("input", saveDraft);
+  });
+
+  $("customerName").addEventListener("input", () => {
+    const input = $("customerName");
+    const original = input.value;
+    // Allow Unicode letters and spaces only; keep non-Latin names valid too.
+    const lettersAndSpaces = original.replace(/[^\p{L}\p{M} ]/gu, "");
+    if (original !== lettersAndSpaces) {
+      input.value = lettersAndSpaces;
+      setFieldFeedback("customerNameFeedback", "Nama hanya boleh berisi huruf dan spasi.");
+    } else {
+      setFieldFeedback("customerNameFeedback", "");
+    }
+    saveDraft();
+  });
+
+  $("customerName").addEventListener("blur", () => {
+    const name = $("customerName").value.trim();
+    if (!name) setFieldFeedback("customerNameFeedback", "Nama wajib diisi.");
+    else if (!/^[\p{L}\p{M} ]+$/u.test(name)) {
+      setFieldFeedback("customerNameFeedback", "Nama hanya boleh berisi huruf dan spasi.");
+    }
+  });
+
+  $("customerPhone").addEventListener("input", () => {
+    // Strip invalid characters but tell customers exactly why their input changed.
+    const input = $("customerPhone");
+    const original = input.value;
+    const digitsOnly = original.replace(/[^0-9]/g, "").slice(0, 15);
+    if (original !== digitsOnly) {
+      input.value = digitsOnly;
+      setFieldFeedback("customerPhoneFeedback", "Nomor HP hanya boleh berisi angka.");
+    } else {
+      setFieldFeedback("customerPhoneFeedback", "");
+    }
+    saveDraft();
+  });
+
+  $("customerPhone").addEventListener("blur", () => {
+    const phone = $("customerPhone").value.trim();
+    if (!phone) setFieldFeedback("customerPhoneFeedback", "Nomor HP wajib diisi.");
+    else if (!/^[0-9]{8,15}$/.test(phone)) {
+      setFieldFeedback("customerPhoneFeedback", "Nomor HP harus 8–15 digit angka.");
+    }
   });
 
   $("toPayment").addEventListener("click", () => {
@@ -449,6 +539,10 @@ function bindEvents() {
   });
 
   $("backToData").addEventListener("click", () => setStep(1));
+
+  // Re-run validators for values restored from an older checkout draft.
+  $("customerName").dispatchEvent(new Event("input", { bubbles: true }));
+  $("customerPhone").dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 loadSettingsFromSession();

@@ -70,6 +70,7 @@ async function getSession() {
 
 function hrefFor(target) {
   return target === "products" ? "/admin.html"
+    : target === "allOrders" ? "/admin-all-orders.html"
     : target === "merchandise" ? "/admin-orders.html"
     : target === "apparel" ? "/admin-apparel.html"
     : "/admin-settings.html";
@@ -90,8 +91,9 @@ function shell(session) {
           </a>
           <nav class="main-nav">
             ${nav("products","Produk")}
-            ${nav("merchandise","List Order Merchandise")}
-            ${nav("apparel","List Order Apparels")}
+            ${nav("allOrders","Semua Order")}
+            ${nav("merchandise","Merchandise")}
+            ${nav("apparel","Kaos / Jaket")}
             ${nav("settings","Pengaturan")}
           </nav>
           <div class="header-actions">
@@ -160,6 +162,38 @@ function orderHasCategory(order, cats) {
   return (order.order_items || []).some(i => cats.includes(i.product_category));
 }
 
+// Angka yang ditampilkan mengikuti rencana customer sampai admin mencatat
+// pembayaran yang benar-benar sudah dicek saat serah-terima.
+function getOrderPaymentSummary(order) {
+  const lineTotal = (order.order_items || []).reduce((sum, item) => {
+    const qty = Number(item.quantity || 0);
+    const price = Number(item.unit_price || 0);
+    const subtotal = item.subtotal == null ? price * qty : Number(item.subtotal);
+    return sum + Math.max(0, Number.isFinite(subtotal) ? subtotal : price * qty);
+  }, 0);
+
+  const storedTotal = Number(order.total_amount || 0);
+  const total = storedTotal > 0 ? storedTotal : lineTotal;
+  const isFullPlan = order.payment_plan === "FULL";
+  const percentage = Number(settings.dp_percentage || 50);
+  const calculatedDue = isFullPlan
+    ? total
+    : Math.min(total, Math.max(0, Math.ceil(total * percentage / 100)));
+  const storedDue = Number(order.payment_amount_due || 0);
+  const due = storedDue > 0 ? Math.min(total, storedDue) : calculatedDue;
+  const storedPaid = Math.max(0, Number(order.paid_amount || 0));
+  const verified = Boolean(order.payment_verified_at) || order.payment_status === "LUNAS" || storedPaid > 0;
+  const paid = verified
+    ? (order.payment_status === "LUNAS" ? total : Math.min(total, storedPaid))
+    : due;
+  const remaining = Math.max(0, total - paid);
+  // Badge in the order list reflects the customer's selected payment plan.
+  // Actual payment verification remains tracked separately in `verified`.
+  const statusLabel = isFullPlan ? "LUNAS" : "DP";
+
+  return { total, due, paid, remaining, verified, statusLabel, isFullPlan };
+}
+
 function renderProductsPage() {
   const merch = orders.filter(o => orderHasCategory(o, ["MERCHANDISE"])).length;
   const apparel = orders.filter(o => orderHasCategory(o, ["TSHIRT","JACKET"])).length;
@@ -178,8 +212,8 @@ function renderProductsPage() {
       <div class="stat-card"><span>Total PO</span><strong>${orders.length}</strong></div>
       <div class="stat-card"><span>Order Merchandise</span><strong>${merch}</strong></div>
       <div class="stat-card"><span>Order Kaos/Jaket</span><strong>${apparel}</strong></div>
-      <div class="stat-card"><span>DP</span><strong>${orders.filter(o=>o.payment_status==="DP").length}</strong></div>
-      <div class="stat-card"><span>Lunas</span><strong>${orders.filter(o=>o.payment_status==="LUNAS").length}</strong></div>
+      <div class="stat-card"><span>Rencana DP</span><strong>${orders.filter(o=>o.payment_plan==="DP").length}</strong></div>
+      <div class="stat-card"><span>Rencana Full Payment</span><strong>${orders.filter(o=>o.payment_plan==="FULL").length}</strong></div>
     </section>
 
     <div class="products-page-grid">
@@ -372,15 +406,23 @@ function renderOrdersPage(mode) {
   currentPage = 1;
   const data = filteredOrders(mode);
   const isApparel = mode === "apparel";
+  const isAllOrders = mode === "all";
+  const pageKicker = isAllOrders ? "SEMUA ORDER" : isApparel ? "KAOS / JAKET" : "MERCHANDISE";
+  const pageTitle = isAllOrders ? "Semua Order" : isApparel ? "Order Kaos / Jaket" : "Order Merchandise";
+  const pageDescription = isAllOrders
+    ? "Satu nomor invoice menampilkan semua item dari pesanan yang sama, termasuk merchandise, kaos, dan jaket."
+    : isApparel
+      ? "Order apparel lengkap dengan ukuran dan rekap jumlah per size."
+      : "Daftar order merchandise yang masuk.";
 
   $("#pageContent").innerHTML = `
     <section class="page-title-row">
       <div>
-        <div class="kicker">${isApparel ? "KAOS / JAKET" : "MERCHANDISE"}</div>
-        <h1>${isApparel ? "List Order Apparels" : "List Order Merchandise"}</h1>
-        <p class="muted">${isApparel ? "Order apparel lengkap dengan ukuran." : "Daftar order merchandise yang masuk."}</p>
+        <div class="kicker">${pageKicker}</div>
+        <h1>${pageTitle}</h1>
+        <p class="muted">${pageDescription}</p>
       </div>
-      <div class="page-count">${data.length} order</div>
+      <div class="page-count">${data.length} invoice</div>
     </section>
 
     ${isApparel ? renderSizeSummary(data) : ""}
@@ -403,12 +445,47 @@ function renderOrdersPage(mode) {
         <div class="modal-head"><div><div class="kicker">BUKTI PEMBAYARAN</div><h2>Bukti Pembayaran</h2></div><button class="btn ghost" type="button" data-close-proof>Tutup</button></div>
         <div id="proofBody"></div>
       </div>
+    </div>
+
+    <div id="paymentEditModal" class="admin-modal hidden">
+      <div class="modal-backdrop" data-close-payment></div>
+      <div class="modal-card payment-edit-card">
+        <div class="modal-head">
+          <div><div class="kicker">PEMBAYARAN</div><h2>Edit Pembayaran / DP</h2><p class="muted">Atur status dan nominal pembayaran pada invoice ini.</p></div>
+          <button class="btn ghost" type="button" data-close-payment>Tutup</button>
+        </div>
+        <div id="paymentEditMessage"></div>
+        <form id="paymentEditForm" class="payment-edit-form">
+          <input id="paymentEditOrderId" type="hidden">
+          <div class="payment-edit-reference">
+            <span>Nomor invoice</span><strong id="paymentEditInvoice">-</strong>
+            <span>Total pesanan</span><strong id="paymentEditTotal">Rp0</strong>
+          </div>
+          <label>Status pembayaran
+            <select id="paymentEditStatus">
+              <option value="DP">DP / Pembayaran sebagian</option>
+              <option value="LUNAS">LUNAS / Full payment</option>
+            </select>
+          </label>
+          <label>Nominal dibayar (Rp)
+            <input id="paymentEditAmount" type="number" min="0" step="1" required>
+          </label>
+          <p id="paymentEditHint" class="muted small">Untuk status DP, nominal harus lebih kecil dari total pesanan.</p>
+          <div class="step-actions end">
+            <button class="btn ghost" type="button" data-close-payment>Batal</button>
+            <button class="btn primary" id="paymentEditSave" type="submit">Simpan Pembayaran</button>
+          </div>
+        </form>
+      </div>
     </div>`;
 
   $("#perPage").value = String(ordersPerPage);
   $("#perPage").onchange = () => { ordersPerPage = Number($("#perPage").value); currentPage = 1; renderOrdersTable(mode); };
   $("#orderSearch").oninput = () => { currentPage = 1; renderOrdersTable(mode); };
   document.querySelectorAll("[data-close-proof]").forEach(el => el.onclick = closeProof);
+  document.querySelectorAll("[data-close-payment]").forEach(el => el.onclick = closePaymentEditor);
+  $("#paymentEditStatus").onchange = () => syncPaymentEditAmount(true);
+  $("#paymentEditForm").onsubmit = event => savePaymentEdit(event, mode);
   renderOrdersTable(mode);
 }
 
@@ -460,20 +537,28 @@ function renderOrdersTable(mode) {
         </tr></thead>
         <tbody>
           ${visible.map(o => {
-            const items = categoryItems(o, mode === "merchandise" ? "MERCHANDISE" : "TSHIRT")
-              .concat(mode === "apparel" ? categoryItems(o,"JACKET") : []);
-            const itemHtml = items.map(i => `${escapeHtml(i.product_name)}${i.size ? ` <span class="item-size">(${escapeHtml(i.size)})</span>`:""} × ${i.quantity}`).join("<br>") || "-";
+            const items = mode === "all"
+              ? (o.order_items || [])
+              : categoryItems(o, mode === "merchandise" ? "MERCHANDISE" : "TSHIRT")
+                  .concat(mode === "apparel" ? categoryItems(o,"JACKET") : []);
+            const itemHtml = items.map(i => {
+              const categoryLabel = i.product_category === "TSHIRT" ? "Kaos" : i.product_category === "JACKET" ? "Jaket" : "Merch";
+              const categoryTag = mode === "all" ? `<span class="category-tag">${categoryLabel}</span> ` : "";
+              return `${categoryTag}${escapeHtml(i.product_name)}${i.size ? ` <span class="item-size">(${escapeHtml(i.size)})</span>`:""} × ${i.quantity}`;
+            }).join("<br>") || "-";
+            const payment = getOrderPaymentSummary(o);
             return `<tr>
               <td><strong>${escapeHtml(o.invoice_no)}</strong><small>${formatDate(o.created_at)}</small></td>
               <td><strong>${escapeHtml(o.customer_name)}</strong><small>${escapeHtml(o.customer_email || "-")}</small><small>${escapeHtml(o.customer_phone || o.customer_contact || "-")}</small></td>
               <td>${itemHtml}</td>
               <td><strong>${o.delivery_method === "SHIP_TO_ADDRESS" ? "Dikirim" : "Booth CF24"}</strong><small>${o.delivery_method === "SHIP_TO_ADDRESS" ? escapeHtml(o.customer_address || "-") : "Ambil langsung"}</small></td>
-              <td><strong>${formatRupiah(o.total_amount)}</strong><small>${o.payment_plan === "FULL" ? "Full Payment" : "DP"} · ${o.payment_method === "QRIS" ? "QRIS" : "Transfer BCA"}</small><small>Bayar ${formatRupiah(o.payment_amount_due || 0)}</small></td>
-              <td><span class="status-pill ${o.payment_status === "LUNAS" ? "paid" : "pending"}">${escapeHtml(o.payment_status)}</span><small>Dibayar ${formatRupiah(o.paid_amount)}</small><small>Sisa ${formatRupiah(o.remaining_amount)}</small></td>
+              <td><strong>${formatRupiah(payment.total)}</strong><small>${o.payment_plan === "FULL" ? "Full Payment" : "DP"} · ${o.payment_method === "QRIS" ? "QRIS" : "Transfer BCA"}</small><small>Bayar sekarang ${formatRupiah(payment.due)}</small></td>
+              <td><span class="status-pill ${payment.isFullPlan ? "paid" : "pending"}">${escapeHtml(payment.statusLabel)}</span><small>${payment.verified ? "Dibayar" : "Sesuai rencana"} ${formatRupiah(payment.paid)}</small><small>${payment.verified ? "Sisa" : "Sisa sesuai rencana"} ${formatRupiah(payment.remaining)}</small>${payment.verified ? "" : `<small>Cek saat serah-terima</small>`}</td>
               <td><div class="row-actions">
                 <button class="btn tiny ghost" data-detail="${o.id}" type="button">Detail</button>
+                <button class="btn tiny ghost" data-invoice="${o.id}" type="button">Invoice</button>
                 ${o.payment_proof_path ? `<button class="btn tiny ghost" data-proof="${o.id}" type="button">Bukti</button>` : `<span class="no-proof">Belum ada bukti</span>`}
-                ${o.payment_status === "DP" ? `<button class="btn tiny primary" data-paid="${o.id}" type="button">Tandai Lunas</button>` : `<button class="btn tiny ghost" data-dp="${o.id}" type="button">Ubah DP</button>`}
+                <button class="btn tiny primary" data-edit-payment="${o.id}" type="button">Edit Pembayaran</button>
               </div></td>
             </tr>
             <tr id="detail-${o.id}" class="hidden"><td colspan="7">${renderOrderDetail(o,mode)}</td></tr>`;
@@ -484,8 +569,8 @@ function renderOrdersTable(mode) {
 
   document.querySelectorAll("[data-detail]").forEach(b=>b.onclick=()=>$("#detail-"+b.dataset.detail).classList.toggle("hidden"));
   document.querySelectorAll("[data-proof]").forEach(b=>b.onclick=()=>viewProof(b.dataset.proof));
-  document.querySelectorAll("[data-paid]").forEach(b=>b.onclick=()=>updatePaymentStatus(b.dataset.paid,"LUNAS",mode));
-  document.querySelectorAll("[data-dp]").forEach(b=>b.onclick=()=>updatePaymentStatus(b.dataset.dp,"DP",mode));
+  document.querySelectorAll("[data-invoice]").forEach(b=>b.onclick=()=>viewOrderInvoice(b.dataset.invoice));
+  document.querySelectorAll("[data-edit-payment]").forEach(b=>b.onclick=()=>openPaymentEditor(b.dataset.editPayment));
 
   $("#pagination").innerHTML = pages > 1 ? `
     <div class="pagination">
@@ -505,50 +590,177 @@ function renderOrderDetail(o, mode) {
     ? `Dikirim ke alamat<br><strong>${escapeHtml(o.customer_address || "-")}</strong>`
     : "Ambil di Booth CF24";
 
-  const items = (o.order_items || []).filter(i =>
-    mode === "merchandise" ? i.product_category === "MERCHANDISE" : ["TSHIRT","JACKET"].includes(i.product_category)
-  );
+  const items = mode === "all"
+    ? (o.order_items || [])
+    : (o.order_items || []).filter(i =>
+        mode === "merchandise" ? i.product_category === "MERCHANDISE" : ["TSHIRT","JACKET"].includes(i.product_category)
+      );
+
+  const payment = getOrderPaymentSummary(o);
 
   return `<div class="detail-box">
     <div class="detail-grid">
       <div><span>Customer</span><strong>${escapeHtml(o.customer_name)}</strong><small>${escapeHtml(o.customer_email || "-")}</small><small>${escapeHtml(o.customer_phone || o.customer_contact || "-")}</small></div>
       <div><span>Pengiriman</span><strong>${delivery}</strong></div>
-      <div><span>Pembayaran</span><strong>${o.payment_plan==="FULL"?"Full Payment":"DP"} · ${o.payment_method==="QRIS"?"QRIS":"Transfer BCA"}</strong><small>Dibayar ${formatRupiah(o.paid_amount)}</small><small>Sisa ${formatRupiah(o.remaining_amount)}</small><small>${o.payment_verified_at ? "Diverifikasi " + formatDate(o.payment_verified_at) : "Belum diverifikasi"}</small></div>
+      <div><span>Pembayaran</span><strong>${o.payment_plan==="FULL"?"Full Payment":"DP"} · ${o.payment_method==="QRIS"?"QRIS":"Transfer BCA"}</strong><small>Status <span class="status-pill ${payment.isFullPlan ? "paid" : "pending"}">${escapeHtml(payment.statusLabel)}</span></small><small>${payment.verified ? "Dibayar" : "Sesuai rencana"} ${formatRupiah(payment.paid)}</small><small>${payment.verified ? "Sisa" : "Sisa sesuai rencana"} ${formatRupiah(payment.remaining)}</small><small>${payment.verified ? (o.payment_verified_at ? "Dicek " + formatDate(o.payment_verified_at) : "Pembayaran tercatat") : "Akan dicek saat serah-terima"}</small></div>
     </div>
     <div class="detail-products"><span>Produk</span>
-      ${items.map(i=>`<div class="detail-product-row"><span>${escapeHtml(i.product_name)}${i.size ? ` · Size ${escapeHtml(i.size)}`:""} × ${i.quantity}</span><strong>${formatRupiah(i.subtotal)}</strong></div>`).join("")}
+      ${items.map(i=>{
+        const catLabel = i.product_category === "TSHIRT" ? "Kaos" : i.product_category === "JACKET" ? "Jaket" : "Merchandise";
+        const catText = mode === "all" ? `<span class="category-tag">${catLabel}</span> ` : "";
+        return `<div class="detail-product-row"><span>${catText}${escapeHtml(i.product_name)}${i.size ? ` · Size ${escapeHtml(i.size)}`:""} × ${i.quantity}</span><strong>${formatRupiah(i.subtotal)}</strong></div>`;
+      }).join("")}
     </div>
   </div>`;
 }
 
-async function updatePaymentStatus(id,status,mode) {
-  const o = orders.find(x=>x.id===id);
+function openPaymentEditor(id) {
+  const o = orders.find(x => x.id === id);
   if (!o) return;
-  let paid = Number(o.paid_amount || 0);
 
-  if (status === "LUNAS") paid = Number(o.total_amount);
-  else {
-    const max = Math.max(1, Number(o.total_amount)-1);
-    const suggested = Math.min(max, Number(o.paid_amount || o.payment_amount_due || 1));
-    const answer = prompt(`Nominal pembayaran untuk ${o.invoice_no}:`, String(suggested));
-    if (answer === null) return;
-    paid = Number(answer);
-    if (!Number.isInteger(paid) || paid <= 0 || paid >= Number(o.total_amount)) {
-      return alert("Nominal DP harus lebih dari 0 dan kurang dari total.");
+  const summary = getOrderPaymentSummary(o);
+  const total = summary.total;
+  $("#paymentEditOrderId").value = o.id;
+  $("#paymentEditInvoice").textContent = o.invoice_no || "-";
+  $("#paymentEditTotal").textContent = formatRupiah(total);
+  $("#paymentEditStatus").value = summary.verified
+    ? (o.payment_status === "LUNAS" ? "LUNAS" : "DP")
+    : (o.payment_plan === "FULL" ? "LUNAS" : "DP");
+  $("#paymentEditAmount").value = String(summary.paid);
+  $("#paymentEditMessage").innerHTML = summary.verified
+    ? ""
+    : `<div class="admin-message">Nilai awal mengikuti rencana pembayaran customer. Pastikan bukti dan nominal aktual sudah cocok saat serah-terima sebelum menyimpan.</div>`;
+  syncPaymentEditAmount();
+  $("#paymentEditModal").classList.remove("hidden");
+}
+
+function syncPaymentEditAmount(forcePlanDefault = false) {
+  const o = orders.find(x => x.id === $("#paymentEditOrderId").value);
+  if (!o) return;
+  const summary = getOrderPaymentSummary(o);
+  const isFull = $("#paymentEditStatus").value === "LUNAS";
+  $("#paymentEditAmount").disabled = isFull;
+  if (isFull) {
+    $("#paymentEditAmount").value = String(summary.total);
+    $("#paymentEditHint").textContent = "Simpan status LUNAS hanya setelah nominal dan bukti pembayaran dicek admin.";
+  } else {
+    const configuredDp = Math.min(summary.total, Math.max(0, Math.ceil(summary.total * Number(settings.dp_percentage || 50) / 100)));
+    const current = summary.verified
+      ? (o.payment_status === "LUNAS" ? configuredDp : summary.paid)
+      : configuredDp;
+    const entered = Number($("#paymentEditAmount").value);
+    if (forcePlanDefault || entered >= summary.total || !$("#paymentEditAmount").value) {
+      $("#paymentEditAmount").value = String(Math.min(Math.max(0, summary.total - 1), current));
     }
+    $("#paymentEditHint").textContent = "Untuk status DP, nominal harus nol atau lebih dan lebih kecil dari total pesanan. Simpan setelah nominal aktual dicek admin.";
   }
+}
+
+function closePaymentEditor() {
+  $("#paymentEditModal")?.classList.add("hidden");
+}
+
+async function savePaymentEdit(event, mode) {
+  event.preventDefault();
+  const id = $("#paymentEditOrderId").value;
+  const o = orders.find(x => x.id === id);
+  if (!o) return;
+
+  const status = $("#paymentEditStatus").value;
+  const total = Number(o.total_amount || 0);
+  let paid = status === "LUNAS" ? total : Number($("#paymentEditAmount").value);
+
+  if (!Number.isFinite(paid) || !Number.isInteger(paid) || paid < 0 || (status === "DP" && paid >= total)) {
+    $("#paymentEditMessage").innerHTML = `<div class="admin-message error">Untuk status DP, nominal harus bilangan bulat dari 0 sampai kurang dari total pesanan.</div>`;
+    return;
+  }
+  if (status === "LUNAS" && paid !== total) {
+    $("#paymentEditMessage").innerHTML = `<div class="admin-message error">Nominal LUNAS harus sama dengan total pesanan.</div>`;
+    return;
+  }
+
+  const button = $("#paymentEditSave");
+  button.disabled = true;
+  button.textContent = "Menyimpan...";
 
   const { error } = await supabase.from("orders").update({
     payment_status: status,
     paid_amount: paid,
     payment_verified_at: new Date().toISOString()
-  }).eq("id",id);
+  }).eq("id", id);
 
-  if (error) return alert("Gagal mengubah status: " + error.message);
+  button.disabled = false;
+  button.textContent = "Simpan Pembayaran";
 
+  if (error) {
+    $("#paymentEditMessage").innerHTML = `<div class="admin-message error">Gagal menyimpan pembayaran: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+
+  closePaymentEditor();
   await loadOrders();
   renderOrdersPage(mode);
-  msg(`Status ${o.invoice_no} berhasil diubah menjadi ${status}.`, "success");
+  msg(`Pembayaran ${o.invoice_no} berhasil diperbarui.`, "success");
+}
+
+function viewOrderInvoice(id) {
+  const o = orders.find(x => x.id === id);
+  if (!o) return;
+
+  // Open synchronously in the click handler so popup blockers are less likely to block it.
+  const invoiceWindow = window.open("", "_blank");
+  if (!invoiceWindow) {
+    alert("Popup invoice diblokir browser. Izinkan pop-up untuk halaman admin ini lalu coba lagi.");
+    return;
+  }
+
+  const items = o.order_items || [];
+  const itemSum = items.reduce((sum, item) => sum + Number(item.subtotal ?? Number(item.unit_price || 0) * Number(item.quantity || 0)), 0);
+  const total = Number(o.total_amount || itemSum);
+  const dueFromPlan = o.payment_plan === "FULL"
+    ? total
+    : Math.min(total, Math.max(1, Math.ceil(total * Number(settings.dp_percentage || 50) / 100)));
+  const due = Number(o.payment_amount_due || dueFromPlan);
+  const storedPaid = Number(o.paid_amount || 0);
+  // Customer invoice is issued immediately from the chosen payment plan. When no admin verification is stored yet,
+  // show the selected plan amount, then admin can reconcile the payment during handover.
+  const paid = o.payment_status === "LUNAS" ? total : (o.payment_verified_at || storedPaid > 0 ? storedPaid : due);
+  const remaining = Math.max(total - paid, 0);
+  const logo = settings.logo_url
+    ? `<img class="brand-logo" src="${escapeHtml(settings.logo_url)}" alt="${escapeHtml(settings.site_name || "Circle Itabaka")}">`
+    : `<div class="brand-logo fallback">IT</div>`;
+  const paymentPlan = o.payment_plan === "FULL" ? "Full Payment" : `DP (${Number(settings.dp_percentage || 50)}%)`;
+  const paymentMethod = o.payment_method === "QRIS" ? "QRIS" : "Transfer Bank blu by BCA Digital";
+  const statusLabel = o.payment_status === "LUNAS" ? "LUNAS" : "CEK SAAT SERAH TERIMA";
+  const itemRows = items.map(item => {
+    const category = item.product_category === "TSHIRT" ? "Kaos" : item.product_category === "JACKET" ? "Jaket" : "Merchandise";
+    const qty = Number(item.quantity || 0);
+    const price = Number(item.unit_price || 0);
+    const subtotal = Number(item.subtotal ?? price * qty);
+    return `<tr>
+      <td><strong>${escapeHtml(item.product_name || "-")}</strong><small>${category}${item.size ? ` · Ukuran ${escapeHtml(item.size)}` : ""}</small></td>
+      <td>${qty}</td><td>${formatRupiah(price)}</td><td class="right">${formatRupiah(subtotal)}</td>
+    </tr>`;
+  }).join("");
+
+  invoiceWindow.document.open();
+  invoiceWindow.document.write(`<!doctype html>
+<html lang="id"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Invoice ${escapeHtml(o.invoice_no || "Itabaka")}</title>
+<style>
+@page{size:A4 portrait;margin:8mm}*{box-sizing:border-box}body{margin:0;background:#eef0f2;color:#17191c;font:12px/1.45 Arial,Helvetica,sans-serif}.toolbar{position:sticky;top:0;display:flex;justify-content:flex-end;gap:8px;padding:12px;background:#fff;border-bottom:1px solid #ddd}.toolbar button{border:0;border-radius:8px;background:#111;color:#fff;padding:10px 14px;font-weight:700;cursor:pointer}.toolbar button.secondary{background:#e9ecef;color:#111}.invoice{--primary:${/^#[0-9a-f]{6}$/i.test(settings.primary_color||"")?settings.primary_color:"#111111"};--accent:${/^#[0-9a-f]{6}$/i.test(settings.accent_color||"")?settings.accent_color:"#777777"};max-width:194mm;min-height:270mm;margin:18px auto;background:#fff;border:1px solid #e4e4e4;border-radius:14px;overflow:hidden;box-shadow:0 12px 38px #0001}.accent{height:6px;background:linear-gradient(90deg,var(--primary),var(--accent))}.inner{padding:8mm}.head{display:grid;grid-template-columns:1fr auto;gap:8mm;align-items:start}.brand{display:flex;align-items:center;gap:4mm}.brand-logo{width:22mm;height:22mm;object-fit:contain;border:1px solid #eee;border-radius:4mm}.brand-logo.fallback{display:grid;place-items:center;background:#111;color:white;font-size:16px;font-weight:900}.brand h2{margin:0;font-size:17px}.brand p{margin:2px 0 0;color:#777}.meta{text-align:right;min-width:48mm}.kicker{font-size:8px;font-weight:800;letter-spacing:.16em;color:#888}.meta h1{margin:2px 0 6px;font-size:20px}.meta-line{display:flex;justify-content:flex-end;gap:10px;font-size:9px;margin:2px 0}.status{display:inline-block;margin-top:4px;padding:4px 8px;border:1px solid #e5d49d;border-radius:999px;background:#f8f0d8;color:#5b470c;font-size:8px;font-weight:800}.rule{height:1px;background:#e6e6e6;margin:5mm 0}.info{display:grid;grid-template-columns:1fr 1fr;gap:3mm}.info-card{border:1px solid #e7e7e7;background:#fafafa;border-radius:3mm;padding:4mm}.label{display:block;font-size:7px;text-transform:uppercase;letter-spacing:.1em;color:#888;font-weight:800;margin-bottom:2mm}.info-card strong{font-size:10px}.info-card p{margin:1mm 0 0;font-size:9px}.table-wrap{margin-top:4mm;border:1px solid #e5e5e5;border-radius:3mm;overflow:hidden}.items{width:100%;border-collapse:collapse}.items th{background:#f5f5f5;text-align:left;color:#6d6d6d;font-size:7px;text-transform:uppercase;letter-spacing:.08em;padding:2.5mm}.items td{padding:2.7mm;border-top:1px solid #eee;font-size:8.5px;vertical-align:top}.items td small{display:block;margin-top:1mm;color:#777;font-size:7px}.right{text-align:right}.bottom{display:grid;grid-template-columns:1fr 72mm;gap:4mm;margin-top:4mm}.payment,.summary{border:1px solid #e5e5e5;border-radius:3mm;padding:4mm}.payment h3{font-size:9px;margin:0 0 3mm}.payrow{display:grid;grid-template-columns:24mm 1fr;gap:1.4mm;font-size:8.5px}.payrow span{color:#777}.sumrow{display:flex;justify-content:space-between;gap:4mm;padding:1.7mm 0;font-size:8.5px}.sumrow.grand{border-top:1px solid var(--primary);margin-top:1.5mm;padding-top:2.5mm;font-size:10px;font-weight:800}.sumrow.grand strong{font-size:12px}.note{font-size:7px;color:#777;line-height:1.4;margin-top:2.5mm}.foot{display:flex;justify-content:space-between;gap:5mm;border-top:1px solid #e5e5e5;padding-top:3mm;margin-top:5mm;font-size:7px;color:#888}.foot strong{color:#555}
+@media print{body{background:#fff}.toolbar{display:none!important}.invoice{max-width:none;width:100%;min-height:0;margin:0;border:1px solid #ddd;border-radius:3mm;box-shadow:none;break-inside:avoid;page-break-inside:avoid}.inner{padding:7mm}.rule{margin:4mm 0}.info-card,.table-wrap,.payment,.summary{break-inside:avoid;page-break-inside:avoid}}
+</style></head><body>
+<div class="toolbar"><button class="secondary" onclick="window.close()">Tutup</button><button onclick="window.print()">Cetak / Simpan PDF</button></div>
+<article class="invoice"><div class="accent"></div><div class="inner">
+<div class="head"><div class="brand">${logo}<div><h2>${escapeHtml(settings.site_name || "Circle Itabaka")}</h2><p>${escapeHtml(settings.site_title || "Pre-Order CF24")}</p></div></div><div class="meta"><div class="kicker">INVOICE PRE-ORDER</div><h1>${escapeHtml(o.invoice_no || "-")}</h1><div class="meta-line"><span>Tanggal</span><strong>${escapeHtml(formatDate(o.created_at))}</strong></div><span class="status">${statusLabel}</span></div></div>
+<div class="rule"></div>
+<div class="info"><div class="info-card"><span class="label">Pemesan</span><strong>${escapeHtml(o.customer_name || "-")}</strong><p>${escapeHtml(o.customer_email || "-")}<br>${escapeHtml(o.customer_phone || o.customer_contact || "-")}</p></div><div class="info-card"><span class="label">Pengambilan / Pengiriman</span><strong>${o.delivery_method === "SHIP_TO_ADDRESS" ? "Dikirim ke alamat" : "Ambil di Booth CF24"}</strong><p>${o.delivery_method === "SHIP_TO_ADDRESS" ? escapeHtml(o.customer_address || "Alamat belum tersedia") : "Pesanan diambil di booth CF24."}</p></div></div>
+<div class="table-wrap"><table class="items"><thead><tr><th>Produk</th><th>Qty</th><th>Harga</th><th class="right">Subtotal</th></tr></thead><tbody>${itemRows || '<tr><td colspan="4">Tidak ada detail item</td></tr>'}</tbody></table></div>
+<div class="bottom"><div><div class="payment"><h3>Informasi Pembayaran</h3><div class="payrow"><span>Rencana</span><strong>${paymentPlan}</strong><span>Metode</span><strong>${paymentMethod}</strong><span>Status</span><strong>${statusLabel}</strong></div></div><div class="note">Nominal invoice mengikuti rencana pembayaran yang dipilih customer. Bukti dan nominal aktual diperiksa admin saat pengambilan/pengiriman.</div></div>
+<div class="summary"><div class="sumrow"><span>Total Pesanan</span><strong>${formatRupiah(total)}</strong></div><div class="sumrow"><span>Bayar Sekarang</span><strong>${formatRupiah(due)}</strong></div><div class="sumrow"><span>Dibayar / sesuai rencana</span><strong>${formatRupiah(paid)}</strong></div><div class="sumrow grand"><span>Sisa Pembayaran</span><strong>${formatRupiah(remaining)}</strong></div></div></div>
+<div class="foot"><span><strong>${escapeHtml(settings.site_name || "Circle Itabaka")}</strong> · ${escapeHtml(settings.site_title || "Pre-Order CF24")}</span><span>Terima kasih sudah melakukan pre-order.</span></div>
+</div></article></body></html>`);
+  invoiceWindow.document.close();
 }
 
 async function viewProof(id) {
@@ -593,8 +805,8 @@ function renderSettingsPage() {
         <div class="panel-head"><div><h2>Pembayaran</h2><p class="muted">Nominal DP dan rekening transfer.</p></div></div>
         <div class="stack">
           <label>Persentase DP<input id="sDp" type="number" min="1" max="99" required></label>
-          <label>Nama Pemilik Rekening<input id="sBcaName"></label>
-          <label>Nomor Rekening<input id="sBcaNumber"></label>
+          <label>Nama Pemilik Rekening BCA<input id="sBcaName"></label>
+          <label>Nomor Rekening BCA<input id="sBcaNumber"></label>
         </div>
       </section>
 
@@ -762,7 +974,7 @@ function makeXlsx(sheets) {
   return zipStore(files);
 }
 function orderRows(list) {
-  const rows=[["Invoice","Tanggal","Customer","Email","HP","Pengiriman","Alamat","Rencana Pembayaran","Metode","Total","Bayar Sekarang","Dibayar","Sisa","Status","Bukti","Produk","Kategori","Size","Qty"]];
+  const rows=[["Invoice","Tanggal","Customer","Email","HP","Pengiriman","Alamat","Rencana Pembayaran","Metode","Total","Bayar Sekarang","Dibayar / Rencana","Sisa / Rencana","Status tampilan","Bukti","Produk","Kategori","Size","Qty"]];
   for (const o of list) {
     for (const i of o.order_items || []) {
       rows.push([
@@ -772,8 +984,8 @@ function orderRows(list) {
         o.customer_address || "",
         o.payment_plan === "FULL" ? "Full Payment" : "DP",
         o.payment_method === "QRIS" ? "QRIS" : "Transfer BCA",
-        Number(o.total_amount), Number(o.payment_amount_due || 0), Number(o.paid_amount || 0),
-        Number(o.remaining_amount || 0), o.payment_status,
+        getOrderPaymentSummary(o).total, getOrderPaymentSummary(o).due, getOrderPaymentSummary(o).paid,
+        getOrderPaymentSummary(o).remaining, getOrderPaymentSummary(o).statusLabel,
         o.payment_proof_path ? "Ada" : "Belum",
         i.product_name, productCategoryLabel(i.product_category), i.size || "", Number(i.quantity || 0)
       ]);
@@ -794,10 +1006,11 @@ function exportAllOrders() {
   }
   const sizeRows=[["Kategori","Size","Total Qty"]];
   [...sizeMap.entries()].sort().forEach(([key,n])=>sizeRows.push([...key.split("|"),n]));
-  const orderOverview=[["Invoice","Tanggal","Customer","Email","HP","Pengiriman","Rencana","Metode","Total","Dibayar","Sisa","Status","Kategori Order"]];
+  const orderOverview=[["Invoice","Tanggal","Customer","Email","HP","Pengiriman","Rencana","Metode","Total","Dibayar / Rencana","Sisa / Rencana","Status tampilan","Kategori Order"]];
   for(const o of orders){
     const cats=[...new Set((o.order_items||[]).map(i=>productCategoryLabel(i.product_category)))].join(", ");
-    orderOverview.push([o.invoice_no,formatDate(o.created_at),o.customer_name,o.customer_email||"",o.customer_phone||o.customer_contact||"",o.delivery_method==="SHIP_TO_ADDRESS"?"Dikirim":"Booth CF24",o.payment_plan==="FULL"?"Full Payment":"DP",o.payment_method==="QRIS"?"QRIS":"Transfer BCA",Number(o.total_amount),Number(o.paid_amount||0),Number(o.remaining_amount||0),o.payment_status,cats]);
+    const payment = getOrderPaymentSummary(o);
+    orderOverview.push([o.invoice_no,formatDate(o.created_at),o.customer_name,o.customer_email||"",o.customer_phone||o.customer_contact||"",o.delivery_method==="SHIP_TO_ADDRESS"?"Dikirim":"Booth CF24",o.payment_plan==="FULL"?"Full Payment":"DP",o.payment_method==="QRIS"?"QRIS":"Transfer BCA",payment.total,payment.paid,payment.remaining,payment.statusLabel,cats]);
   }
   const sheets=[
     {name:"Semua Order",rows:orderOverview},
@@ -818,11 +1031,14 @@ async function renderPage() {
   if (page === "products") {
     await Promise.all([loadProducts(),loadOrders()]);
     renderProductsPage();
+  } else if (page === "allOrders") {
+    await Promise.all([loadOrders(),loadSettings()]);
+    renderOrdersPage("all");
   } else if (page === "merchandise") {
-    await loadOrders();
+    await Promise.all([loadOrders(),loadSettings()]);
     renderOrdersPage("merchandise");
   } else if (page === "apparel") {
-    await loadOrders();
+    await Promise.all([loadOrders(),loadSettings()]);
     renderOrdersPage("apparel");
   } else {
     await loadSettings();
