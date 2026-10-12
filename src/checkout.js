@@ -160,7 +160,8 @@ function renderShell() {
           </section>
         </form>
 
-        <aside class="card summary-card checkout-summary-card">
+        <aside id="checkoutSummary"
+       class="card summary-card checkout-summary-card hidden">
           <div class="summary-header"><h3>Ringkasan Pesanan</h3></div>
           <div id="summaryItems"></div>
           <div class="total-row"><span>Total</span><strong id="grandTotal">Rp0</strong></div>
@@ -235,6 +236,11 @@ function setStep(step) {
     indicator.classList.toggle("active", number === step);
     indicator.classList.toggle("done", number < step);
   });
+
+  const checkoutSummary = $("checkoutSummary");
+if (checkoutSummary) {
+  checkoutSummary.classList.toggle("hidden", step !== 2);
+}
 
   if (step === 2) renderPaymentInfo();
   window.scrollTo({ top: 0, behavior: "smooth" });

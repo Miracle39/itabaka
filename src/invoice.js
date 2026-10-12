@@ -49,9 +49,7 @@ function paymentMethodText(order) {
 }
 
 function paymentStatusText(order) {
-  return order.payment_status === "LUNAS"
-    ? "LUNAS"
-    : "MENUNGGU VERIFIKASI";
+  return "CEK SAAT SERAH TERIMA";
 }
 
 async function loadSiteSettings() {
@@ -92,12 +90,43 @@ function renderInvoice({ order, items }, settings) {
   const primary = settings.primary_color || "#111111";
   const accent = settings.accent_color || "#777777";
 
-  const totalAmount = Number(order.total_amount || 0);
-  const paidAmount = Number(order.paid_amount || 0);
-  const remainingAmount = order.remaining_amount != null
-    ? Number(order.remaining_amount)
-    : Math.max(totalAmount - paidAmount, 0);
-  const paymentDue = Number(order.payment_amount_due || 0);
+  // The public-order RPC may omit total_amount from its JSON response.
+  // Rebuild the total from saved line items when that field is unavailable.
+  const itemsTotal = detailItems.reduce((sum, item) => {
+    const qty = Number(item.qty ?? item.quantity ?? 0);
+    const unitPrice = Number(item.price ?? item.unit_price ?? 0);
+    const lineSubtotal = item.subtotal != null ? Number(item.subtotal) : NaN;
+    const lineTotal = Number.isFinite(lineSubtotal) && lineSubtotal >= 0
+      ? lineSubtotal
+      : unitPrice * qty;
+    return sum + Math.max(0, lineTotal);
+  }, 0);
+
+  const storedTotal = Number(order.total_amount);
+  const totalAmount = Number.isFinite(storedTotal) && storedTotal > 0
+    ? storedTotal
+    : itemsTotal;
+
+  // Prefer the DP percentage saved by checkout, so later admin setting changes
+  // do not retroactively change the amount due on this invoice.
+  const checkoutSettings = readSession("itabaka_settings_v1") || {};
+  const percentageValue = Number(
+    order.dp_percentage ?? checkoutSettings.dp_percentage ?? settings.dp_percentage ?? 50
+  );
+  const dpPercentage = Number.isFinite(percentageValue) && percentageValue > 0
+    ? Math.min(99, percentageValue)
+    : 50;
+
+  // "Bayar Sekarang" follows the selected payment plan, not a missing/stale RPC field.
+  const paymentDue = order.payment_plan === "FULL"
+    ? totalAmount
+    : Math.min(totalAmount, Math.max(1, Math.ceil(totalAmount * dpPercentage / 100)));
+
+  // Invoice is issued immediately using the customer's chosen plan.
+  // The admin checks the transfer/proof at pickup or delivery; we do not wait
+  // for that check before showing the planned amount on the customer invoice.
+  const paidAmount = paymentDue;
+  const remainingAmount = Math.max(totalAmount - paymentDue, 0);
 
   const warningHtml = warning
     ? `<div class="invoice-notice invoice-notice-error invoice-screen-only"><strong>Perhatian:</strong> ${escapeHtml(warning)}</div>`
@@ -290,7 +319,7 @@ function renderInvoice({ order, items }, settings) {
                 </div>
 
                 <div class="invoice-note">
-                  Pesanan baru dianggap lunas setelah pembayaran diverifikasi oleh admin.
+                  “Bayar Sekarang” dihitung dari rencana pembayaran yang dipilih. “Dibayar” mengikuti rencana pembayaran yang dipilih saat checkout. Admin akan mengecek pembayaran dan bukti saat pengambilan atau pengiriman.
                 </div>
               </div>
 
@@ -366,7 +395,7 @@ function printInvoiceDocument(order, settings) {
     .invoice-brand-text p{margin:1.5mm 0 0;color:#666;font-size:9px}
     .invoice-kicker{font-size:8px;font-weight:900;letter-spacing:.15em;color:#888;text-transform:uppercase;margin-bottom:1mm}
     .invoice-title{margin:0;font-size:21px;line-height:1}
-    .invoice-meta-card{text-align:right;min-width:44mm}
+    .invoice-meta-card{text-align:right;min-width:55mm}
     .invoice-meta-row{display:flex;justify-content:flex-end;gap:3mm;margin:1mm 0;font-size:8.5px}
     .invoice-meta-row span:first-child{color:#777}
     .invoice-status{display:inline-flex;margin-top:2mm;padding:1.7mm 2.5mm;border-radius:999px;background:#f4ead0;border:1px solid #ebd69b;color:#5d480d;font-size:7.5px;font-weight:900}
