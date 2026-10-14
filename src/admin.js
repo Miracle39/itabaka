@@ -556,7 +556,7 @@ function renderOrdersTable(mode) {
               <td>${itemHtml}</td>
               <td><strong>${o.delivery_method === "SHIP_TO_ADDRESS" ? "Dikirim" : "Booth CF24"}</strong><small>${o.delivery_method === "SHIP_TO_ADDRESS" ? escapeHtml(o.customer_address || "-") : "Ambil langsung"}</small></td>
               <td><strong>${formatRupiah(payment.total)}</strong><small>${o.payment_plan === "FULL" ? "Full Payment" : "DP"} · ${o.payment_method === "QRIS" ? "QRIS" : "Transfer BCA"}</small><small>Bayar sekarang ${formatRupiah(payment.due)}</small></td>
-              <td><span class="status-pill ${payment.isPaidStatus ? "paid" : "pending"}">${escapeHtml(payment.statusLabel)}</span><small>${payment.verified ? "Dibayar" : "Sesuai rencana"} ${formatRupiah(payment.paid)}</small><small>${payment.verified ? "Sisa" : "Sisa sesuai rencana"} ${formatRupiah(payment.remaining)}</small>${payment.verified ? "" : `<small>Cek saat serah-terima</small>`}</td>
+              <td><span class="status-pill ${payment.isPaidStatus ? "paid" : "pending"}">${escapeHtml(payment.statusLabel)}</span><small>${payment.verified ? "Dibayar" : "Sesuai rencana"} ${formatRupiah(payment.paid)}</small><small>${payment.verified ? "Sisa" : "Sisa"} ${formatRupiah(payment.remaining)}</td>
               <td><div class="row-actions">
                 <button class="btn tiny ghost" data-detail="${o.id}" type="button">Detail</button>
                 <button class="btn tiny ghost" data-invoice="${o.id}" type="button">Invoice</button>
