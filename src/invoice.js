@@ -49,7 +49,11 @@ function paymentMethodText(order) {
 }
 
 function paymentStatusText(order) {
-  return "CEK SAAT SERAH TERIMA";
+  // Full Payment tampil sebagai LUNAS langsung pada invoice customer.
+  // DP tetap menggunakan status pengecekan saat serah-terima.
+  return order.payment_plan === "FULL"
+    ? "LUNAS"
+    : "DP";
 }
 
 async function loadSiteSettings() {
@@ -241,7 +245,7 @@ function renderInvoice({ order, items }, settings) {
                   <span>Tanggal</span>
                   <strong>${safeDate(order.created_at)}</strong>
                 </div>
-                <span class="invoice-status ${order.payment_status === "LUNAS" ? "is-paid" : ""}">${escapeHtml(paymentStatusText(order))}</span>
+                <span class="invoice-status ${order.payment_plan === "FULL" || order.payment_status === "LUNAS" ? "is-paid" : ""}">${escapeHtml(paymentStatusText(order))}</span>
               </div>
             </div>
 
@@ -319,7 +323,9 @@ function renderInvoice({ order, items }, settings) {
                 </div>
 
                 <div class="invoice-note">
-                  “Bayar Sekarang” dihitung dari rencana pembayaran yang dipilih. “Dibayar” mengikuti rencana pembayaran yang dipilih saat checkout. Admin akan mengecek pembayaran dan bukti saat pengambilan atau pengiriman.
+                  ${order.payment_plan === "FULL"
+                    ? "Full Payment dipilih. Status invoice langsung LUNAS. Simpan invoice ini sebagai bukti pemesanan."
+                    : "Rencana pembayaran DP dipilih. Nominal DP dan sisa pembayaran mengikuti pilihan saat checkout; bukti pembayaran akan dicocokkan admin saat pengambilan atau pengiriman."}
                 </div>
               </div>
 
@@ -327,10 +333,6 @@ function renderInvoice({ order, items }, settings) {
                 <div class="summary-row">
                   <span>Total Pesanan</span>
                   <strong>${money(totalAmount)}</strong>
-                </div>
-                <div class="summary-row">
-                  <span>Bayar Sekarang</span>
-                  <strong>${money(paymentDue)}</strong>
                 </div>
                 <div class="summary-row">
                   <span>Dibayar</span>

@@ -187,11 +187,14 @@ function getOrderPaymentSummary(order) {
     ? (order.payment_status === "LUNAS" ? total : Math.min(total, storedPaid))
     : due;
   const remaining = Math.max(0, total - paid);
-  // Badge in the order list reflects the customer's selected payment plan.
-  // Actual payment verification remains tracked separately in `verified`.
-  const statusLabel = isFullPlan ? "LUNAS" : "DP";
+  // Before admin records a handover check, show the customer's selected plan.
+  // After admin saves the payment editor, display the actual saved payment_status.
+  const statusLabel = verified
+    ? (order.payment_status === "LUNAS" ? "LUNAS" : "DP")
+    : (isFullPlan ? "LUNAS" : "DP");
+  const isPaidStatus = statusLabel === "LUNAS";
 
-  return { total, due, paid, remaining, verified, statusLabel, isFullPlan };
+  return { total, due, paid, remaining, verified, statusLabel, isFullPlan, isPaidStatus };
 }
 
 function renderProductsPage() {
@@ -425,7 +428,7 @@ function renderOrdersPage(mode) {
       <div class="page-count">${data.length} invoice</div>
     </section>
 
-    ${isApparel ? renderSizeSummary(data) : ""}
+    ${(isApparel || isAllOrders) ? renderSizeSummary(data) : ""}
 
     <section class="panel-card orders-panel">
       <div class="orders-toolbar">
@@ -553,7 +556,7 @@ function renderOrdersTable(mode) {
               <td>${itemHtml}</td>
               <td><strong>${o.delivery_method === "SHIP_TO_ADDRESS" ? "Dikirim" : "Booth CF24"}</strong><small>${o.delivery_method === "SHIP_TO_ADDRESS" ? escapeHtml(o.customer_address || "-") : "Ambil langsung"}</small></td>
               <td><strong>${formatRupiah(payment.total)}</strong><small>${o.payment_plan === "FULL" ? "Full Payment" : "DP"} · ${o.payment_method === "QRIS" ? "QRIS" : "Transfer BCA"}</small><small>Bayar sekarang ${formatRupiah(payment.due)}</small></td>
-              <td><span class="status-pill ${payment.isFullPlan ? "paid" : "pending"}">${escapeHtml(payment.statusLabel)}</span><small>${payment.verified ? "Dibayar" : "Sesuai rencana"} ${formatRupiah(payment.paid)}</small><small>${payment.verified ? "Sisa" : "Sisa sesuai rencana"} ${formatRupiah(payment.remaining)}</small>${payment.verified ? "" : `<small>Cek saat serah-terima</small>`}</td>
+              <td><span class="status-pill ${payment.isPaidStatus ? "paid" : "pending"}">${escapeHtml(payment.statusLabel)}</span><small>${payment.verified ? "Dibayar" : "Sesuai rencana"} ${formatRupiah(payment.paid)}</small><small>${payment.verified ? "Sisa" : "Sisa sesuai rencana"} ${formatRupiah(payment.remaining)}</small>${payment.verified ? "" : `<small>Cek saat serah-terima</small>`}</td>
               <td><div class="row-actions">
                 <button class="btn tiny ghost" data-detail="${o.id}" type="button">Detail</button>
                 <button class="btn tiny ghost" data-invoice="${o.id}" type="button">Invoice</button>
@@ -602,7 +605,7 @@ function renderOrderDetail(o, mode) {
     <div class="detail-grid">
       <div><span>Customer</span><strong>${escapeHtml(o.customer_name)}</strong><small>${escapeHtml(o.customer_email || "-")}</small><small>${escapeHtml(o.customer_phone || o.customer_contact || "-")}</small></div>
       <div><span>Pengiriman</span><strong>${delivery}</strong></div>
-      <div><span>Pembayaran</span><strong>${o.payment_plan==="FULL"?"Full Payment":"DP"} · ${o.payment_method==="QRIS"?"QRIS":"Transfer BCA"}</strong><small>Status <span class="status-pill ${payment.isFullPlan ? "paid" : "pending"}">${escapeHtml(payment.statusLabel)}</span></small><small>${payment.verified ? "Dibayar" : "Sesuai rencana"} ${formatRupiah(payment.paid)}</small><small>${payment.verified ? "Sisa" : "Sisa sesuai rencana"} ${formatRupiah(payment.remaining)}</small><small>${payment.verified ? (o.payment_verified_at ? "Dicek " + formatDate(o.payment_verified_at) : "Pembayaran tercatat") : "Akan dicek saat serah-terima"}</small></div>
+      <div><span>Pembayaran</span><strong>${o.payment_plan==="FULL"?"Full Payment":"DP"} · ${o.payment_method==="QRIS"?"QRIS":"Transfer BCA"}</strong><small>Status <span class="status-pill ${payment.isPaidStatus ? "paid" : "pending"}">${escapeHtml(payment.statusLabel)}</span></small><small>${payment.verified ? "Dibayar" : "Sesuai rencana"} ${formatRupiah(payment.paid)}</small><small>${payment.verified ? "Sisa" : "Sisa sesuai rencana"} ${formatRupiah(payment.remaining)}</small><small>${payment.verified ? (o.payment_verified_at ? "Dicek " + formatDate(o.payment_verified_at) : "Pembayaran tercatat") : "Akan dicek saat serah-terima"}</small></div>
     </div>
     <div class="detail-products"><span>Produk</span>
       ${items.map(i=>{
@@ -722,16 +725,20 @@ function viewOrderInvoice(id) {
     : Math.min(total, Math.max(1, Math.ceil(total * Number(settings.dp_percentage || 50) / 100)));
   const due = Number(o.payment_amount_due || dueFromPlan);
   const storedPaid = Number(o.paid_amount || 0);
-  // Customer invoice is issued immediately from the chosen payment plan. When no admin verification is stored yet,
-  // show the selected plan amount, then admin can reconcile the payment during handover.
-  const paid = o.payment_status === "LUNAS" ? total : (o.payment_verified_at || storedPaid > 0 ? storedPaid : due);
+  // Customer invoice is issued immediately from the chosen payment plan. Once an admin saves the payment editor,
+  // use the saved status and paid amount for subsequent invoice reprints.
+  const paymentWasChecked = Boolean(o.payment_verified_at) || o.payment_status === "LUNAS" || storedPaid > 0;
+  const paid = o.payment_status === "LUNAS" ? total : (paymentWasChecked ? Math.min(total, Math.max(0, storedPaid)) : due);
   const remaining = Math.max(total - paid, 0);
   const logo = settings.logo_url
     ? `<img class="brand-logo" src="${escapeHtml(settings.logo_url)}" alt="${escapeHtml(settings.site_name || "Circle Itabaka")}">`
     : `<div class="brand-logo fallback">IT</div>`;
   const paymentPlan = o.payment_plan === "FULL" ? "Full Payment" : `DP (${Number(settings.dp_percentage || 50)}%)`;
   const paymentMethod = o.payment_method === "QRIS" ? "QRIS" : "Transfer Bank blu by BCA Digital";
-  const statusLabel = o.payment_status === "LUNAS" ? "LUNAS" : "CEK SAAT SERAH TERIMA";
+  const statusLabel = paymentWasChecked
+    ? (o.payment_status === "LUNAS" ? "LUNAS" : "DP")
+    : (o.payment_plan === "FULL" ? "LUNAS" : "CEK SAAT SERAH TERIMA");
+  const statusClass = statusLabel === "LUNAS" ? "paid" : "dp";
   const itemRows = items.map(item => {
     const category = item.product_category === "TSHIRT" ? "Kaos" : item.product_category === "JACKET" ? "Jaket" : "Merchandise";
     const qty = Number(item.quantity || 0);
@@ -747,12 +754,12 @@ function viewOrderInvoice(id) {
   invoiceWindow.document.write(`<!doctype html>
 <html lang="id"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Invoice ${escapeHtml(o.invoice_no || "Itabaka")}</title>
 <style>
-@page{size:A4 portrait;margin:8mm}*{box-sizing:border-box}body{margin:0;background:#eef0f2;color:#17191c;font:12px/1.45 Arial,Helvetica,sans-serif}.toolbar{position:sticky;top:0;display:flex;justify-content:flex-end;gap:8px;padding:12px;background:#fff;border-bottom:1px solid #ddd}.toolbar button{border:0;border-radius:8px;background:#111;color:#fff;padding:10px 14px;font-weight:700;cursor:pointer}.toolbar button.secondary{background:#e9ecef;color:#111}.invoice{--primary:${/^#[0-9a-f]{6}$/i.test(settings.primary_color||"")?settings.primary_color:"#111111"};--accent:${/^#[0-9a-f]{6}$/i.test(settings.accent_color||"")?settings.accent_color:"#777777"};max-width:194mm;min-height:270mm;margin:18px auto;background:#fff;border:1px solid #e4e4e4;border-radius:14px;overflow:hidden;box-shadow:0 12px 38px #0001}.accent{height:6px;background:linear-gradient(90deg,var(--primary),var(--accent))}.inner{padding:8mm}.head{display:grid;grid-template-columns:1fr auto;gap:8mm;align-items:start}.brand{display:flex;align-items:center;gap:4mm}.brand-logo{width:22mm;height:22mm;object-fit:contain;border:1px solid #eee;border-radius:4mm}.brand-logo.fallback{display:grid;place-items:center;background:#111;color:white;font-size:16px;font-weight:900}.brand h2{margin:0;font-size:17px}.brand p{margin:2px 0 0;color:#777}.meta{text-align:right;min-width:48mm}.kicker{font-size:8px;font-weight:800;letter-spacing:.16em;color:#888}.meta h1{margin:2px 0 6px;font-size:20px}.meta-line{display:flex;justify-content:flex-end;gap:10px;font-size:9px;margin:2px 0}.status{display:inline-block;margin-top:4px;padding:4px 8px;border:1px solid #e5d49d;border-radius:999px;background:#f8f0d8;color:#5b470c;font-size:8px;font-weight:800}.rule{height:1px;background:#e6e6e6;margin:5mm 0}.info{display:grid;grid-template-columns:1fr 1fr;gap:3mm}.info-card{border:1px solid #e7e7e7;background:#fafafa;border-radius:3mm;padding:4mm}.label{display:block;font-size:7px;text-transform:uppercase;letter-spacing:.1em;color:#888;font-weight:800;margin-bottom:2mm}.info-card strong{font-size:10px}.info-card p{margin:1mm 0 0;font-size:9px}.table-wrap{margin-top:4mm;border:1px solid #e5e5e5;border-radius:3mm;overflow:hidden}.items{width:100%;border-collapse:collapse}.items th{background:#f5f5f5;text-align:left;color:#6d6d6d;font-size:7px;text-transform:uppercase;letter-spacing:.08em;padding:2.5mm}.items td{padding:2.7mm;border-top:1px solid #eee;font-size:8.5px;vertical-align:top}.items td small{display:block;margin-top:1mm;color:#777;font-size:7px}.right{text-align:right}.bottom{display:grid;grid-template-columns:1fr 72mm;gap:4mm;margin-top:4mm}.payment,.summary{border:1px solid #e5e5e5;border-radius:3mm;padding:4mm}.payment h3{font-size:9px;margin:0 0 3mm}.payrow{display:grid;grid-template-columns:24mm 1fr;gap:1.4mm;font-size:8.5px}.payrow span{color:#777}.sumrow{display:flex;justify-content:space-between;gap:4mm;padding:1.7mm 0;font-size:8.5px}.sumrow.grand{border-top:1px solid var(--primary);margin-top:1.5mm;padding-top:2.5mm;font-size:10px;font-weight:800}.sumrow.grand strong{font-size:12px}.note{font-size:7px;color:#777;line-height:1.4;margin-top:2.5mm}.foot{display:flex;justify-content:space-between;gap:5mm;border-top:1px solid #e5e5e5;padding-top:3mm;margin-top:5mm;font-size:7px;color:#888}.foot strong{color:#555}
+@page{size:A4 portrait;margin:8mm}*{box-sizing:border-box}body{margin:0;background:#eef0f2;color:#17191c;font:12px/1.45 Arial,Helvetica,sans-serif}.toolbar{position:sticky;top:0;display:flex;justify-content:flex-end;gap:8px;padding:12px;background:#fff;border-bottom:1px solid #ddd}.toolbar button{border:0;border-radius:8px;background:#111;color:#fff;padding:10px 14px;font-weight:700;cursor:pointer}.toolbar button.secondary{background:#e9ecef;color:#111}.invoice{--primary:${/^#[0-9a-f]{6}$/i.test(settings.primary_color||"")?settings.primary_color:"#111111"};--accent:${/^#[0-9a-f]{6}$/i.test(settings.accent_color||"")?settings.accent_color:"#777777"};max-width:194mm;min-height:270mm;margin:18px auto;background:#fff;border:1px solid #e4e4e4;border-radius:14px;overflow:hidden;box-shadow:0 12px 38px #0001}.accent{height:6px;background:linear-gradient(90deg,var(--primary),var(--accent))}.inner{padding:8mm}.head{display:grid;grid-template-columns:1fr auto;gap:8mm;align-items:start}.brand{display:flex;align-items:center;gap:4mm}.brand-logo{width:22mm;height:22mm;object-fit:contain;border:1px solid #eee;border-radius:4mm}.brand-logo.fallback{display:grid;place-items:center;background:#111;color:white;font-size:16px;font-weight:900}.brand h2{margin:0;font-size:17px}.brand p{margin:2px 0 0;color:#777}.meta{text-align:right;min-width:48mm}.kicker{font-size:8px;font-weight:800;letter-spacing:.16em;color:#888}.meta h1{margin:2px 0 6px;font-size:20px}.meta-line{display:flex;justify-content:flex-end;gap:10px;font-size:9px;margin:2px 0}.status{display:inline-block;margin-top:4px;padding:4px 8px;border-radius:999px;font-size:8px;font-weight:800}.status.paid{border:1px solid #b7e4c7;background:#dcfce7;color:#166534}.status.dp{border:1px solid #e5d49d;background:#f8f0d8;color:#5b470c}.rule{height:1px;background:#e6e6e6;margin:5mm 0}.info{display:grid;grid-template-columns:1fr 1fr;gap:3mm}.info-card{border:1px solid #e7e7e7;background:#fafafa;border-radius:3mm;padding:4mm}.label{display:block;font-size:7px;text-transform:uppercase;letter-spacing:.1em;color:#888;font-weight:800;margin-bottom:2mm}.info-card strong{font-size:10px}.info-card p{margin:1mm 0 0;font-size:9px}.table-wrap{margin-top:4mm;border:1px solid #e5e5e5;border-radius:3mm;overflow:hidden}.items{width:100%;border-collapse:collapse}.items th{background:#f5f5f5;text-align:left;color:#6d6d6d;font-size:7px;text-transform:uppercase;letter-spacing:.08em;padding:2.5mm}.items td{padding:2.7mm;border-top:1px solid #eee;font-size:8.5px;vertical-align:top}.items td small{display:block;margin-top:1mm;color:#777;font-size:7px}.right{text-align:right}.bottom{display:grid;grid-template-columns:1fr 72mm;gap:4mm;margin-top:4mm}.payment,.summary{border:1px solid #e5e5e5;border-radius:3mm;padding:4mm}.payment h3{font-size:9px;margin:0 0 3mm}.payrow{display:grid;grid-template-columns:24mm 1fr;gap:1.4mm;font-size:8.5px}.payrow span{color:#777}.sumrow{display:flex;justify-content:space-between;gap:4mm;padding:1.7mm 0;font-size:8.5px}.sumrow.grand{border-top:1px solid var(--primary);margin-top:1.5mm;padding-top:2.5mm;font-size:10px;font-weight:800}.sumrow.grand strong{font-size:12px}.note{font-size:7px;color:#777;line-height:1.4;margin-top:2.5mm}.foot{display:flex;justify-content:space-between;gap:5mm;border-top:1px solid #e5e5e5;padding-top:3mm;margin-top:5mm;font-size:7px;color:#888}.foot strong{color:#555}
 @media print{body{background:#fff}.toolbar{display:none!important}.invoice{max-width:none;width:100%;min-height:0;margin:0;border:1px solid #ddd;border-radius:3mm;box-shadow:none;break-inside:avoid;page-break-inside:avoid}.inner{padding:7mm}.rule{margin:4mm 0}.info-card,.table-wrap,.payment,.summary{break-inside:avoid;page-break-inside:avoid}}
 </style></head><body>
 <div class="toolbar"><button class="secondary" onclick="window.close()">Tutup</button><button onclick="window.print()">Cetak / Simpan PDF</button></div>
 <article class="invoice"><div class="accent"></div><div class="inner">
-<div class="head"><div class="brand">${logo}<div><h2>${escapeHtml(settings.site_name || "Circle Itabaka")}</h2><p>${escapeHtml(settings.site_title || "Pre-Order CF24")}</p></div></div><div class="meta"><div class="kicker">INVOICE PRE-ORDER</div><h1>${escapeHtml(o.invoice_no || "-")}</h1><div class="meta-line"><span>Tanggal</span><strong>${escapeHtml(formatDate(o.created_at))}</strong></div><span class="status">${statusLabel}</span></div></div>
+<div class="head"><div class="brand">${logo}<div><h2>${escapeHtml(settings.site_name || "Circle Itabaka")}</h2><p>${escapeHtml(settings.site_title || "Pre-Order CF24")}</p></div></div><div class="meta"><div class="kicker">INVOICE PRE-ORDER</div><h1>${escapeHtml(o.invoice_no || "-")}</h1><div class="meta-line"><span>Tanggal</span><strong>${escapeHtml(formatDate(o.created_at))}</strong></div><span class="status ${statusClass}">${statusLabel}</span></div></div>
 <div class="rule"></div>
 <div class="info"><div class="info-card"><span class="label">Pemesan</span><strong>${escapeHtml(o.customer_name || "-")}</strong><p>${escapeHtml(o.customer_email || "-")}<br>${escapeHtml(o.customer_phone || o.customer_contact || "-")}</p></div><div class="info-card"><span class="label">Pengambilan / Pengiriman</span><strong>${o.delivery_method === "SHIP_TO_ADDRESS" ? "Dikirim ke alamat" : "Ambil di Booth CF24"}</strong><p>${o.delivery_method === "SHIP_TO_ADDRESS" ? escapeHtml(o.customer_address || "Alamat belum tersedia") : "Pesanan diambil di booth CF24."}</p></div></div>
 <div class="table-wrap"><table class="items"><thead><tr><th>Produk</th><th>Qty</th><th>Harga</th><th class="right">Subtotal</th></tr></thead><tbody>${itemRows || '<tr><td colspan="4">Tidak ada detail item</td></tr>'}</tbody></table></div>
