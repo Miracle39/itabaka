@@ -737,7 +737,7 @@ function viewOrderInvoice(id) {
   const paymentMethod = o.payment_method === "QRIS" ? "QRIS" : "Transfer Bank blu by BCA Digital";
   const statusLabel = paymentWasChecked
     ? (o.payment_status === "LUNAS" ? "LUNAS" : "DP")
-    : (o.payment_plan === "FULL" ? "LUNAS" : "CEK SAAT SERAH TERIMA");
+    : (o.payment_plan === "FULL" ? "LUNAS" : "DP");
   const statusClass = statusLabel === "LUNAS" ? "paid" : "dp";
   const itemRows = items.map(item => {
     const category = item.product_category === "TSHIRT" ? "Kaos" : item.product_category === "JACKET" ? "Jaket" : "Merchandise";
