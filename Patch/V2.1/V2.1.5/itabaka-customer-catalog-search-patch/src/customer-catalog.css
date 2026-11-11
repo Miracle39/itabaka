@@ -1,0 +1,97 @@
+/* Customer catalog: split merchandise/apparel and searchable catalog */
+.product-search-wrap {
+  display: block;
+  max-width: 620px;
+  margin: 0 0 30px;
+  font-size: 14px;
+}
+.product-search-wrap span {
+  display: block;
+  margin-bottom: 7px;
+  font-weight: 800;
+}
+.product-search {
+  width: 100%;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid #d9d9d9;
+  border-radius: 12px;
+  background: #fff;
+  outline: none;
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+.product-search:focus {
+  border-color: #777;
+  box-shadow: 0 0 0 3px rgba(0,0,0,.07);
+}
+.catalog-group {
+  margin: 0 0 38px;
+}
+.catalog-group-title {
+  margin: 0 0 18px;
+  font-size: 25px;
+  font-weight: 900;
+}
+/* No divider/border between the two catalog categories. */
+.catalog-group + .catalog-group {
+  border: 0;
+}
+.floating-notice {
+  position: fixed;
+  z-index: 300;
+  left: 50%;
+  bottom: 26px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 13px 18px;
+  border-radius: 14px;
+  background: #171717;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.45;
+  text-align: center;
+  box-shadow: 0 12px 34px rgba(0,0,0,.22);
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%,18px) scale(.96);
+  transition: opacity .22s ease, transform .22s ease, visibility .22s ease;
+  pointer-events: none;
+}
+.floating-notice.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%,0) scale(1);
+}
+.floating-notice.success { background: #176b3a; }
+.floating-notice.error { background: #a52323; }
+.out-of-stock-button { background: #e8e8e8; color: #777; cursor: pointer; }
+.cart-count-bump { animation: cartCountBump .38s ease; }
+.cart-line-added { animation: cartLineEnter .42s ease both; }
+.cart-modal-card.cart-modal-opening { animation: cartPanelEnter .28s ease both; }
+@keyframes cartCountBump {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.35); }
+  100% { transform: scale(1); }
+}
+@keyframes cartLineEnter {
+  from { opacity: .25; transform: translateX(18px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes cartPanelEnter {
+  from { opacity: .6; transform: translateX(28px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@media (max-width: 800px) {
+  .catalog-group { margin-bottom: 30px; }
+  .catalog-group-title { font-size: 22px; }
+}
+@media (max-width: 600px) {
+  .floating-notice { bottom: 18px; font-size: 13px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .floating-notice { transition: none; }
+  .cart-count-bump, .cart-line-added, .cart-modal-card.cart-modal-opening {
+    animation: none !important;
+  }
+}
