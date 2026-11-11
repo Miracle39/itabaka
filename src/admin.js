@@ -2,10 +2,11 @@ import "./admin.css";
 import { supabase } from "./lib/supabase.js";
 import { escapeHtml, formatDate, formatRupiah } from "./lib/format.js";
 
-const page = document.body.dataset.adminPage || "products";
+const page = new URLSearchParams(window.location.search).get("page") || document.body.dataset.adminPage || "products"; // apparelTypesPagePatch
 const app = document.querySelector("#app");
 let products = [];
 let orders = [];
+let apparelTypes = [];
 let settings = {};
 let editingProductId = null;
 let ordersPerPage = 10;
@@ -70,6 +71,7 @@ async function getSession() {
 
 function hrefFor(target) {
   return target === "products" ? "/admin.html"
+    : target === "apparelTypes" ? "/admin.html?page=apparelTypes"
     : target === "allOrders" ? "/admin-all-orders.html"
     : target === "merchandise" ? "/admin-orders.html"
     : target === "apparel" ? "/admin-apparel.html"
@@ -94,7 +96,8 @@ function shell(session) {
             ${nav("products","Produk")}
             ${nav("allOrders","Semua Order")}
             ${nav("merchandise","Merchandise")}
-            ${nav("apparel","Kaos / Jaket")}
+            ${nav("apparel","Apparel")}
+            ${nav("apparelTypes","Jenis Apparel")}
             ${nav("promos","Promo Member")}
             ${nav("settings","Pengaturan")}
           </nav>
@@ -120,21 +123,42 @@ function shell(session) {
 async function loadProducts() {
   const { data, error } = await supabase.from("products").select(`
     id,code,name,description,price,image_url,stock,active,sort_order,
-    category,available_sizes,created_at,updated_at
+    category,apparel_type,available_sizes,created_at,updated_at
   `).order("sort_order").order("name");
   if (error) throw error;
   products = data || [];
+}
+
+async function loadApparelTypes() {
+  const { data, error } = await supabase
+    .from("apparel_types")
+    .select("code,name,is_active,sort_order")
+    .order("sort_order")
+    .order("name");
+  if (error) throw error;
+  apparelTypes = data || [];
+}
+
+function apparelTypeName(code) {
+  const found = apparelTypes.find(type => type.code === code);
+  if (found) return found.name;
+  if (code === "TSHIRT") return "Kaos";
+  if (code === "JACKET") return "Jaket";
+  return code || "Apparel";
 }
 
 async function loadOrders() {
   const { data, error } = await supabase.from("orders").select(`
     id,invoice_no,created_at,
     customer_name,customer_email,customer_contact,customer_phone,customer_address,
-    delivery_method,payment_status,payment_plan,payment_method,
+    delivery_method,payment_status,payment_plan,payment_method,customer_payment_status,
     payment_amount_due,total_amount,subtotal_amount,discount_amount,promo_code,paid_amount,remaining_amount,
-    payment_proof_path,payment_proof_uploaded_at,payment_verified_at,
+    payment_proof_path,payment_proof_uploaded_at,settlement_proof_path,settlement_proof_uploaded_at,payment_verified_at,
     order_items(
-      id,product_id,product_name,product_category,size,unit_price,quantity,subtotal
+      id,product_id,product_name,product_category,apparel_type,size,unit_price,quantity,subtotal
+    ),
+    order_payments(
+      id,payment_type,expected_amount,reported_amount,proof_path,internal_status,internal_note,uploaded_at,checked_at,checked_by
     )
   `).order("created_at", {ascending:false});
   if (error) throw error;
@@ -152,16 +176,32 @@ async function loadSettings() {
   settings = data || {};
 }
 
-function productCategoryLabel(c) {
-  return c === "TSHIRT" ? "Kaos" : c === "JACKET" ? "Jaket" : "Merchandise";
+function getOrderItemApparelType(item) {
+  if (item?.apparel_type) return item.apparel_type;
+  // Pesanan lama tetap menggunakan product_category TSHIRT/JACKET.
+  if (item?.product_category === "TSHIRT" || item?.product_category === "JACKET") return item.product_category;
+  return null;
+}
+
+function isOrderItemApparel(item) {
+  return item?.product_category === "APPAREL" || Boolean(getOrderItemApparelType(item));
+}
+
+function productCategoryLabel(category, apparelType = null) {
+  const type = apparelType || (category === "TSHIRT" || category === "JACKET" ? category : null);
+  return type ? apparelTypeName(type) : "Merchandise";
 }
 
 function categoryItems(order, cat) {
-  return (order.order_items || []).filter(i => i.product_category === cat);
+  return (order.order_items || []).filter(i =>
+    cat === "APPAREL" ? isOrderItemApparel(i) : i.product_category === cat
+  );
 }
 
 function orderHasCategory(order, cats) {
-  return (order.order_items || []).some(i => cats.includes(i.product_category));
+  return (order.order_items || []).some(i =>
+    (cats.includes("APPAREL") && isOrderItemApparel(i)) || cats.includes(i.product_category)
+  );
 }
 
 // Angka yang ditampilkan mengikuti rencana customer sampai admin mencatat
@@ -185,23 +225,28 @@ function getOrderPaymentSummary(order) {
   const due = storedDue > 0 ? Math.min(total, storedDue) : calculatedDue;
   const storedPaid = Math.max(0, Number(order.paid_amount || 0));
   const verified = Boolean(order.payment_verified_at) || order.payment_status === "LUNAS" || storedPaid > 0;
-  const paid = verified
-    ? (order.payment_status === "LUNAS" ? total : Math.min(total, storedPaid))
-    : due;
-  const remaining = Math.max(0, total - paid);
-  // Before admin records a handover check, show the customer's selected plan.
-  // After admin saves the payment editor, display the actual saved payment_status.
-  const statusLabel = verified
-    ? (order.payment_status === "LUNAS" ? "LUNAS" : "DP")
-    : (isFullPlan ? "LUNAS" : "DP");
-  const isPaidStatus = statusLabel === "LUNAS";
+
+  // Status customer langsung menjadi LUNAS setelah memilih FULL atau mengunggah
+  // bukti pelunasan DP. Status internal tetap terpisah untuk verifikasi admin.
+  const customerStatus = String(
+    order.customer_payment_status || (isFullPlan ? "LUNAS" : "DP")
+  ).trim().toUpperCase();
+  const isPaidStatus = customerStatus === "LUNAS" || (verified && order.payment_status === "LUNAS");
+  const statusLabel = isPaidStatus ? "LUNAS" : "DP";
+
+  // Nominal terbayar mengikuti status pesanan customer. Untuk DP yang belum
+  // lunas, tampilkan nominal DP; setelah LUNAS, seluruh total dianggap terbayar.
+  const paid = isPaidStatus
+    ? total
+    : (verified ? Math.min(total, storedPaid) : due);
+  const remaining = isPaidStatus ? 0 : Math.max(0, total - paid);
 
   return { total, due, paid, remaining, verified, statusLabel, isFullPlan, isPaidStatus };
 }
 
 function renderProductsPage() {
   const merch = orders.filter(o => orderHasCategory(o, ["MERCHANDISE"])).length;
-  const apparel = orders.filter(o => orderHasCategory(o, ["TSHIRT","JACKET"])).length;
+  const apparel = orders.filter(o => orderHasCategory(o, ["APPAREL","TSHIRT","JACKET"])).length;
 
   $("#pageContent").innerHTML = `
     <section class="page-title-row">
@@ -229,16 +274,20 @@ function renderProductsPage() {
         </div>
         <form id="productForm" class="stack">
           <div class="form-grid two">
-            <label>Kode Produk<input id="pCode" maxlength="40" required></label>
+            <label>Kode Produk<input id="pCode" maxlength="40" readonly required><small class="muted">Kode dibuat otomatis: ITB untuk merchandise, APP untuk apparel.</small></label>
             <label>Nama Produk<input id="pName" maxlength="120" required></label>
           </div>
-          <label>Kategori
-            <select id="pCategory">
-              <option value="MERCHANDISE">Merchandise</option>
-              <option value="TSHIRT">Kaos</option>
-              <option value="JACKET">Jaket</option>
-            </select>
-          </label>
+          <div class="form-grid two">
+            <label>Kategori
+              <select id="pCategory">
+                <option value="MERCHANDISE">Merchandise</option>
+                <option value="APPAREL">Apparel</option>
+              </select>
+            </label>
+            <label id="apparelTypeField" class="hidden">Jenis Apparel
+              <select id="pApparelType"></select>
+            </label>
+          </div>
           <label>Deskripsi<textarea id="pDescription" rows="4" maxlength="1000"></textarea></label>
           <div class="form-grid two">
             <label>Harga<input id="pPrice" type="number" min="0" step="1000" required></label>
@@ -270,19 +319,106 @@ function renderProductsPage() {
         </div>
         <div id="catalogList"></div>
       </section>
-    </div>`;
+    </div>
 
+    <section class="panel-card apparel-type-manager" style="margin-top:22px">
+      <div class="panel-head">
+        <div><div class="kicker">PENGELOLAAN KATEGORI</div><h2>Jenis Apparel</h2><p class="muted">Tambah jenis pakaian tanpa mengubah kode website.</p></div>
+      </div>
+      <form id="apparelTypeForm" class="form-grid two" style="align-items:end">
+        <label>Nama jenis baru<input id="newApparelTypeName" maxlength="50" placeholder="Contoh: Hoodie" required></label>
+        <button class="btn primary" type="submit">Tambah Jenis Apparel</button>
+      </form>
+      <div id="apparelTypeList" style="margin-top:16px"></div>
+    </section>`;
+
+  renderApparelTypeOptions();
+  renderApparelTypeManager();
+  $("#apparelTypeForm").onsubmit = addApparelType;
   $("#productForm").onsubmit = saveProduct;
+  $("#pCategory")?.addEventListener("change", () => {
+    if (!editingProductId && $("#pCode")) $("#pCode").value = generateProductCode($("#pCategory").value);
+  });
+  if (!editingProductId && $("#pCode")) $("#pCode").value = generateProductCode($("#pCategory").value);
+  $("#pCategory").onchange = syncApparelTypeField;
+  syncApparelTypeField();
   $("#cancelEdit").onclick = resetProductForm;
   $("#productSearch").oninput = renderCatalogList;
   $("#exportOrders").onclick = exportAllOrders;
   renderCatalogList();
 }
 
+function makeApparelTypeCode(name) {
+  const ascii = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  const base = ascii.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return base.slice(0, 40);
+}
+
+function renderApparelTypeOptions(selected = null) {
+  const select = $("#pApparelType");
+  if (!select) return;
+  const current = selected || select.value;
+  const active = apparelTypes.filter(type => type.is_active || type.code === current);
+  select.innerHTML = active.map(type => `<option value="${escapeHtml(type.code)}">${escapeHtml(type.name)}${type.is_active ? "" : " (Nonaktif - produk lama)"}</option>`).join("");
+  if (current && active.some(type => type.code === current)) select.value = current;
+  else if (active.length) select.value = active[0].code;
+}
+
+ {
+  const target = $("#apparelTypeList");
+  if (!target) return;
+  target.innerHTML = apparelTypes.length ? `
+    <div class="apparel-type-grid">
+      ${apparelTypes.map(type => `
+        <article class="apparel-type-card">
+          <div class="apparel-type-card-top">
+            <span class="apparel-type-code">${escapeHtml(type.code || "-")}</span>
+            <span class="status-pill ${type.is_active ? "active" : "inactive"}">${type.is_active ? "AKTIF" : "NONAKTIF"}</span>
+          </div>
+          <h3>${escapeHtml(type.name || "Tanpa nama")}</h3>
+          <button class="btn ${type.is_active ? "ghost" : "primary"} full" type="button" data-toggle-apparel-type="${type.id}">
+            ${type.is_active ? "Nonaktifkan" : "Aktifkan"}
+          </button>
+        </article>
+      `).join("")}
+    </div>` : `<div class="empty-state">Belum ada jenis apparel. Tambahkan jenis pertama melalui formulir di atas.</div>`;
+  target.querySelectorAll("[data-toggle-apparel-type]").forEach(button => {
+    button.addEventListener("click", () => toggleApparelType(button.dataset.toggleApparelType));
+  });
+}
+
+async function addApparelType(event) {
+  event.preventDefault();
+  const name = $("#newApparelTypeName").value.trim();
+  const code = makeApparelTypeCode(name);
+  if (!code) return msg("Nama jenis tidak valid.", "error");
+  if (apparelTypes.some(type => type.code === code || type.name.toLowerCase() === name.toLowerCase())) {
+    return msg("Jenis Apparel tersebut sudah ada.", "error");
+  }
+  const { error } = await supabase.from("apparel_types").insert({
+    code, name, is_active: true, sort_order: apparelTypes.length * 10
+  });
+  if (error) return msg("Gagal menambahkan jenis: " + error.message, "error");
+  $("#newApparelTypeName").value = "";
+  await loadApparelTypes();
+  renderApparelTypeOptions();
+  renderApparelTypeManager();
+  msg("Jenis Apparel berhasil ditambahkan.", "success");
+}
+
+async function toggleApparelType(code, active) {
+  const { error } = await supabase.from("apparel_types").update({is_active: active}).eq("code", code);
+  if (error) return msg("Gagal mengubah status jenis: " + error.message, "error");
+  await loadApparelTypes();
+  renderApparelTypeOptions();
+  renderApparelTypeManager();
+  msg(active ? "Jenis Apparel diaktifkan." : "Jenis Apparel dinonaktifkan.", "success");
+}
+
 function renderCatalogList() {
   const q = ($("#productSearch")?.value || "").toLowerCase().trim();
   const filtered = products.filter(p => `${p.code} ${p.name} ${p.description || ""}`.toLowerCase().includes(q));
-  $("#catalogList").innerHTML = filtered.length ? `
+  $("#cfunction renderApparelTypeManager()atalogList").innerHTML = filtered.length ? `
     <div class="catalog-grid">
       ${filtered.map(p => `
         <article class="catalog-card">
@@ -297,7 +433,7 @@ function renderCatalogList() {
             <h3>${escapeHtml(p.name)}</h3>
             <p class="catalog-desc">${escapeHtml(p.description || "Tidak ada deskripsi.")}</p>
             <div class="catalog-details">
-              <div><span>Kategori</span><strong>${productCategoryLabel(p.category)}</strong></div>
+              <div><span>Kategori</span><strong>${productCategoryLabel(p.category, p.apparel_type)}</strong></div>
               <div><span>Harga</span><strong>${formatRupiah(p.price)}</strong></div>
               <div><span>Stok</span><strong>${p.stock ?? "∞"}</strong></div>
               <div><span>Ukuran</span><strong>${(p.available_sizes || []).length ? escapeHtml(p.available_sizes.join(", ")) : "-"}</strong></div>
@@ -311,6 +447,13 @@ function renderCatalogList() {
   document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => editProduct(b.dataset.edit));
 }
 
+function syncApparelTypeField() {
+  const isApparel = $("#pCategory")?.value === "APPAREL";
+  $("#apparelTypeField")?.classList.toggle("hidden", !isApparel);
+  const sizesLabel = $("#pSizes")?.closest("label");
+  if (sizesLabel) sizesLabel.classList.toggle("hidden", !isApparel);
+}
+
 function editProduct(id) {
   const p = products.find(x => x.id === id);
   if (!p) return;
@@ -318,7 +461,9 @@ function editProduct(id) {
   $("#productFormTitle").textContent = "Edit Produk";
   $("#pCode").value = p.code || "";
   $("#pName").value = p.name || "";
-  $("#pCategory").value = p.category || "MERCHANDISE";
+  $("#pCategory").value = p.category === "TSHIRT" || p.category === "JACKET" ? "APPAREL" : (p.category || "MERCHANDISE");
+  renderApparelTypeOptions(p.apparel_type || (p.category === "JACKET" ? "JACKET" : "TSHIRT"));
+  syncApparelTypeField();
   $("#pDescription").value = p.description || "";
   $("#pPrice").value = p.price ?? "";
   $("#pStock").value = p.stock ?? "";
@@ -334,8 +479,11 @@ function resetProductForm() {
   editingProductId = null;
   $("#productForm").reset();
   $("#pCategory").value = "MERCHANDISE";
+  renderApparelTypeOptions();
+  syncApparelTypeField();
   $("#pActive").value = "true";
   $("#productFormTitle").textContent = "Tambah Produk";
+  if (products.length && $("#pCode")) $("#pCode").value = generateProductCode($("#pCategory").value);
   $("#cancelEdit").classList.add("hidden");
 }
 
@@ -351,6 +499,15 @@ async function uploadAsset(bucket, folder, file) {
   return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl;
 }
 
+function generateProductCode(category) {
+  const prefix = category === "MERCHANDISE" ? "ITB" : "APP";
+  const largest = products.reduce((max, product) => {
+    const match = String(product.code || "").trim().match(new RegExp("^" + prefix + "-(\\d+)$", "i"));
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  return prefix + "-" + String(largest + 1).padStart(3, "0");
+}
+
 async function saveProduct(e) {
   e.preventDefault();
   const button = e.submitter;
@@ -358,9 +515,11 @@ async function saveProduct(e) {
 
   try {
     const category = $("#pCategory").value;
+    const apparelType = category === "APPAREL" ? $("#pApparelType").value : null;
+    if (category === "APPAREL" && !apparelType) throw new Error("Tambahkan jenis Apparel terlebih dahulu.");
     const sizes = $("#pSizes").value.split(",").map(s => s.trim().toUpperCase()).filter(Boolean);
-    if ((category === "TSHIRT" || category === "JACKET") && !sizes.length) {
-      throw new Error("Kaos/jaket harus memiliki minimal satu ukuran.");
+    if (category === "APPAREL" && !sizes.length) {
+      throw new Error("Apparel harus memiliki minimal satu ukuran.");
     }
 
     let imageUrl = $("#pImageUrl").value.trim() || null;
@@ -368,9 +527,10 @@ async function saveProduct(e) {
     if (file) imageUrl = await uploadAsset("product-images","products",file);
 
     const payload = {
-      code: $("#pCode").value.trim(),
+      code: editingProductId ? $("#pCode").value.trim() : generateProductCode(category),
       name: $("#pName").value.trim(),
       category,
+      apparel_type: apparelType,
       description: $("#pDescription").value.trim() || null,
       price: Number($("#pPrice").value),
       stock: $("#pStock").value === "" ? null : Number($("#pStock").value),
@@ -393,6 +553,7 @@ async function saveProduct(e) {
     resetProductForm();
     await loadProducts();
     renderProductsPage();
+    removeApparelTypesPanel();
     msg(wasEditing ? "Produk berhasil diperbarui." : "Produk berhasil ditambahkan.", "success");
   } catch (error) {
     msg("Gagal menyimpan produk: " + error.message, "error");
@@ -403,7 +564,7 @@ async function saveProduct(e) {
 
 function filteredOrders(categoryMode) {
   if (categoryMode === "merchandise") return orders.filter(o => orderHasCategory(o,["MERCHANDISE"]));
-  if (categoryMode === "apparel") return orders.filter(o => orderHasCategory(o,["TSHIRT","JACKET"]));
+  if (categoryMode === "apparel") return orders.filter(o => orderHasCategory(o,["APPAREL","TSHIRT","JACKET"]));
   return orders;
 }
 
@@ -498,8 +659,9 @@ function renderSizeSummary(data) {
   const map = new Map();
   for (const order of data) {
     for (const item of order.order_items || []) {
-      if (!["TSHIRT","JACKET"].includes(item.product_category) || !item.size) continue;
-      const key = `${item.product_category}|${item.size}`;
+      const apparelType = getOrderItemApparelType(item);
+      if (!apparelType || !item.size) continue;
+      const key = `${apparelType}|${item.size}`;
       map.set(key, (map.get(key) || 0) + Number(item.quantity || 0));
     }
   }
@@ -544,26 +706,30 @@ function renderOrdersTable(mode) {
           ${visible.map(o => {
             const items = mode === "all"
               ? (o.order_items || [])
-              : categoryItems(o, mode === "merchandise" ? "MERCHANDISE" : "TSHIRT")
-                  .concat(mode === "apparel" ? categoryItems(o,"JACKET") : []);
+              : categoryItems(o, mode === "merchandise" ? "MERCHANDISE" : "APPAREL");
             const itemHtml = items.map(i => {
-              const categoryLabel = i.product_category === "TSHIRT" ? "Kaos" : i.product_category === "JACKET" ? "Jaket" : "Merch";
+              const categoryLabel = productCategoryLabel(i.product_category, getOrderItemApparelType(i));
               const categoryTag = mode === "all" ? `<span class="category-tag">${categoryLabel}</span> ` : "";
               return `${categoryTag}${escapeHtml(i.product_name)}${i.size ? ` <span class="item-size">(${escapeHtml(i.size)})</span>`:""} × ${i.quantity}`;
             }).join("<br>") || "-";
             const payment = getOrderPaymentSummary(o);
+            const initialPayment = (o.order_payments || []).find(p => p.payment_type === "INITIAL");
+            const settlementPayment = (o.order_payments || []).find(p => p.payment_type === "SETTLEMENT");
+            const hasInitialProof = Boolean(initialPayment?.proof_path || o.payment_proof_path);
+            const hasSettlementProof = Boolean(settlementPayment?.proof_path || o.settlement_proof_path);
             return `<tr>
               <td><strong>${escapeHtml(o.invoice_no)}</strong><small>${formatDate(o.created_at)}</small></td>
               <td><strong>${escapeHtml(o.customer_name)}</strong><small>${escapeHtml(o.customer_email || "-")}</small><small>${escapeHtml(o.customer_phone || o.customer_contact || "-")}</small></td>
               <td>${itemHtml}</td>
               <td><strong>${o.delivery_method === "SHIP_TO_ADDRESS" ? "Dikirim" : "Booth CF24"}</strong><small>${o.delivery_method === "SHIP_TO_ADDRESS" ? escapeHtml(o.customer_address || "-") : "Ambil langsung"}</small></td>
-              <td><strong>${formatRupiah(payment.total)}</strong><small>${o.payment_plan === "FULL" ? "Full Payment" : "DP"} · ${o.payment_method === "QRIS" ? "QRIS" : "Transfer BCA"}</small><small>Bayar sekarang ${formatRupiah(payment.due)}</small></td>
-              <td><span class="status-pill ${payment.isPaidStatus ? "paid" : "pending"}">${escapeHtml(payment.statusLabel)}</span><small>${payment.verified ? "Dibayar" : "Sesuai rencana"} ${formatRupiah(payment.paid)}</small><small>${payment.verified ? "Sisa" : "Sisa"} ${formatRupiah(payment.remaining)}</td>
+              <td><strong>${formatRupiah(payment.total)}</strong><small>${o.payment_plan === "FULL" ? "Full Payment" : "DP"} · ${o.payment_method === "QRIS" ? "QRIS" : "Transfer BCA"}</small><small>Terbayar ${formatRupiah(payment.paid)}</small></td>
+              <td><span class="status-pill ${payment.isPaidStatus ? "paid" : "pending"}">${escapeHtml(payment.statusLabel)}</span><small>Sisa aktual ${formatRupiah(payment.remaining)}</small></td>
               <td><div class="row-actions">
                 <button class="btn tiny ghost" data-detail="${o.id}" type="button">Detail</button>
                 <button class="btn tiny ghost" data-invoice="${o.id}" type="button">Invoice</button>
-                ${o.payment_proof_path ? `<button class="btn tiny ghost" data-proof="${o.id}" type="button">Bukti</button>` : `<span class="no-proof">Belum ada bukti</span>`}
-                <button class="btn tiny primary" data-edit-payment="${o.id}" type="button">Edit Pembayaran</button>
+                ${hasInitialProof ? (initialPayment?.proof_path ? `<button class="btn tiny ghost" data-order-id="${o.id}" data-payment-proof="${initialPayment.id}" type="button">Bukti 1</button>` : `<button class="btn tiny ghost" data-proof="${o.id}" type="button">Bukti 1</button>`) : `<span class="no-proof">Bukti 1 belum ada</span>`}
+                ${hasSettlementProof ? (settlementPayment?.proof_path ? `<button class="btn tiny ghost" data-order-id="${o.id}" data-payment-proof="${settlementPayment.id}" type="button">Bukti 2</button>` : `<button class="btn tiny ghost" data-settlement-proof-order="${o.id}" type="button">Bukti 2</button>`) : ""}
+
               </div></td>
             </tr>
             <tr id="detail-${o.id}" class="hidden"><td colspan="7">${renderOrderDetail(o,mode)}</td></tr>`;
@@ -576,6 +742,9 @@ function renderOrdersTable(mode) {
   document.querySelectorAll("[data-proof]").forEach(b=>b.onclick=()=>viewProof(b.dataset.proof));
   document.querySelectorAll("[data-invoice]").forEach(b=>b.onclick=()=>viewOrderInvoice(b.dataset.invoice));
   document.querySelectorAll("[data-edit-payment]").forEach(b=>b.onclick=()=>openPaymentEditor(b.dataset.editPayment));
+  document.querySelectorAll("[data-payment-proof]").forEach(b=>b.onclick=()=>viewOrderPaymentProof(b.dataset.orderId,b.dataset.paymentProof));
+  document.querySelectorAll("[data-settlement-proof-order]").forEach(b=>b.onclick=()=>viewSettlementProofPath(b.dataset.settlementProofOrder));
+  document.querySelectorAll("[data-save-payment-check]").forEach(b=>b.onclick=()=>saveInternalPaymentCheck(b.dataset.orderId,b.dataset.savePaymentCheck,mode));
 
   $("#pagination").innerHTML = pages > 1 ? `
     <div class="pagination">
@@ -598,10 +767,13 @@ function renderOrderDetail(o, mode) {
   const items = mode === "all"
     ? (o.order_items || [])
     : (o.order_items || []).filter(i =>
-        mode === "merchandise" ? i.product_category === "MERCHANDISE" : ["TSHIRT","JACKET"].includes(i.product_category)
+        mode === "merchandise" ? i.product_category === "MERCHANDISE" : isOrderItemApparel(i)
       );
 
   const payment = getOrderPaymentSummary(o);
+  const rawWaPhone = String(o.customer_phone || o.customer_contact || "").replace(/\D/g, "");
+  const waPhone = rawWaPhone.startsWith("0") ? `62${rawWaPhone.slice(1)}` : rawWaPhone;
+  const waMessage = encodeURIComponent(`Halo ${o.customer_name || ""}, kami dari tim Itabaka ingin mengonfirmasi pembayaran untuk invoice ${o.invoice_no}. Ada hal yang perlu kami cocokkan terkait nominal atau bukti transfer. Bisa dibantu cek kembali?`);
 
   return `<div class="detail-box">
     <div class="detail-grid">
@@ -611,7 +783,7 @@ function renderOrderDetail(o, mode) {
     </div>
     <div class="detail-products"><span>Produk</span>
       ${items.map(i=>{
-        const catLabel = i.product_category === "TSHIRT" ? "Kaos" : i.product_category === "JACKET" ? "Jaket" : "Merchandise";
+        const catLabel = productCategoryLabel(i.product_category, getOrderItemApparelType(i));
         const catText = mode === "all" ? `<span class="category-tag">${catLabel}</span> ` : "";
         return `<div class="detail-product-row"><span>${catText}${escapeHtml(i.product_name)}${i.size ? ` · Size ${escapeHtml(i.size)}`:""} × ${i.quantity}</span><strong>${formatRupiah(i.subtotal)}</strong></div>`;
       }).join("")}
@@ -620,6 +792,19 @@ function renderOrderDetail(o, mode) {
       <div class="detail-product-row"><span>Subtotal</span><strong>${formatRupiah(o.subtotal_amount ?? payment.total)}</strong></div>
       ${Number(o.discount_amount || 0) > 0 ? `<div class="detail-product-row"><span>Promo ${escapeHtml(o.promo_code || "Member")}</span><strong>-${formatRupiah(o.discount_amount)}</strong></div>` : ""}
       <div class="detail-product-row"><strong>Total setelah diskon</strong><strong>${formatRupiah(payment.total)}</strong></div>
+      <div class="detail-product-row"><span>Status invoice customer</span><strong>${escapeHtml(o.customer_payment_status || (o.payment_plan === "FULL" ? "LUNAS" : "DP"))}</strong></div>
+    </div>
+    <div class="detail-products internal-payment-review"><span>Riwayat Bukti Pembayaran · Pengecekan Internal</span>
+      ${(o.order_payments || []).length ? (o.order_payments || []).map(p => {
+        const title = p.payment_type === "SETTLEMENT" ? "Bukti 2 · Pelunasan" : `Bukti 1 · ${o.payment_plan === "FULL" ? "Full Payment" : "DP"}`;
+        const reviewLabel = p.internal_status === "MATCHED" ? "Sesuai" : p.internal_status === "CONTACT" ? "Perlu hubungi customer" : "Belum dicek";
+        return `<div class="internal-payment-row" style="border:1px solid #e7e7e7;border-radius:12px;padding:13px;margin:10px 0;display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,1fr);gap:10px;align-items:end">
+          <div><strong>${title}</strong><small style="display:block;color:#777;margin-top:4px">Upload ${formatDate(p.uploaded_at)} · Ekspektasi ${formatRupiah(p.expected_amount)}</small><small style="display:block;color:#777">Nominal dilaporkan ${formatRupiah(p.reported_amount)} · ${reviewLabel}</small>${p.proof_path ? `<button class="btn tiny ghost" data-order-id="${o.id}" data-payment-proof="${p.id}" type="button">Lihat Bukti</button>` : p.payment_type === "INITIAL" && o.payment_proof_path ? `<button class="btn tiny ghost" data-proof="${o.id}" type="button">Lihat Bukti Pembayaran Pertama</button>` : p.payment_type === "SETTLEMENT" && o.settlement_proof_path ? `<button class="btn tiny ghost" data-settlement-proof-order="${o.id}" type="button">Lihat Bukti Pelunasan</button>` : `<small class="muted">File bukti tidak tercatat.</small>`}${waPhone.length >= 8 ? `<a class="btn tiny ghost" href="https://wa.me/${waPhone}?text=${waMessage}" target="_blank" rel="noreferrer">Hubungi via WhatsApp</a>` : ""}</div>
+          <div><label style="font-size:12px">Nominal yang terlihat di rekening<input data-reported-amount="${p.id}" type="number" min="1" step="1" value="${Number(p.reported_amount || p.expected_amount)}" style="margin:4px 0 8px"></label><label style="font-size:12px">Hasil pengecekan<select data-internal-status="${p.id}" style="margin:4px 0 8px"><option value="PENDING" ${p.internal_status === "PENDING" ? "selected" : ""}>Belum dicek</option><option value="MATCHED" ${p.internal_status === "MATCHED" ? "selected" : ""}>Sesuai</option><option value="CONTACT" ${p.internal_status === "CONTACT" ? "selected" : ""}>Perlu hubungi customer</option></select></label><input data-internal-note="${p.id}" type="text" maxlength="500" placeholder="Catatan internal / alasan hubungi customer" value="${escapeHtml(p.internal_note || "")}" style="margin:0 0 8px"><button class="btn tiny primary" data-order-id="${o.id}" data-save-payment-check="${p.id}" type="button">Simpan Pengecekan</button></div>
+        </div>`;
+      }).join("") : `<p class="muted small">Belum ada bukti pembayaran yang tercatat di riwayat verifikasi.</p>`}
+      ${o.payment_proof_path && !(o.order_payments || []).some(p => p.payment_type === "INITIAL") ? `<div class="internal-payment-row" style="border:1px solid #e7e7e7;border-radius:12px;padding:13px;margin:10px 0"><strong>Bukti 1 · ${o.payment_plan === "FULL" ? "Full Payment" : "DP"}</strong><small style="display:block;color:#777;margin:4px 0 8px">${o.payment_proof_uploaded_at ? "Upload " + formatDate(o.payment_proof_uploaded_at) : "Bukti pembayaran awal tersimpan"}</small><button class="btn tiny ghost" data-proof="${o.id}" type="button">Lihat Bukti Pembayaran Pertama</button></div>` : ""}
+      ${o.payment_plan === "DP" && !(o.order_payments || []).some(p => p.payment_type === "SETTLEMENT") ? `<div class="internal-payment-row" style="border:1px solid #e7e7e7;border-radius:12px;padding:13px;margin:10px 0"><strong>Bukti 2 · Pelunasan</strong>${o.settlement_proof_path ? `<small style="display:block;color:#777;margin:4px 0 8px">${o.settlement_proof_uploaded_at ? "Upload " + formatDate(o.settlement_proof_uploaded_at) : "Bukti pelunasan tersimpan"}</small><button class="btn tiny ghost" data-settlement-proof-order="${o.id}" type="button">Lihat Bukti Pelunasan</button>` : `<small style="display:block;color:#777;margin:4px 0 0">Belum diunggah oleh customer.</small>`}</div>` : ""}
     </div>
   </div>`;
 }
@@ -735,22 +920,20 @@ function viewOrderInvoice(id) {
     : Math.min(total, Math.max(1, Math.ceil(total * Number(settings.dp_percentage || 50) / 100)));
   const due = Number(o.payment_amount_due || dueFromPlan);
   const storedPaid = Number(o.paid_amount || 0);
-  // Customer invoice is issued immediately from the chosen payment plan. Once an admin saves the payment editor,
-  // use the saved status and paid amount for subsequent invoice reprints.
-  const paymentWasChecked = Boolean(o.payment_verified_at) || o.payment_status === "LUNAS" || storedPaid > 0;
-  const paid = o.payment_status === "LUNAS" ? total : (paymentWasChecked ? Math.min(total, Math.max(0, storedPaid)) : due);
+  // Customer invoice reflects the customer's reported plan/payment status.
+  // Internal verification remains separate and is visible in the admin payment history.
+  const customerReportedLunas = (o.customer_payment_status || (o.payment_plan === "FULL" ? "LUNAS" : "DP")) === "LUNAS";
+  const paid = customerReportedLunas ? total : due;
   const remaining = Math.max(total - paid, 0);
   const logo = settings.logo_url
     ? `<img class="brand-logo" src="${escapeHtml(settings.logo_url)}" alt="${escapeHtml(settings.site_name || "Circle Itabaka")}">`
     : `<div class="brand-logo fallback">IT</div>`;
   const paymentPlan = o.payment_plan === "FULL" ? "Full Payment" : `DP (${Number(settings.dp_percentage || 50)}%)`;
   const paymentMethod = o.payment_method === "QRIS" ? "QRIS" : "Transfer Bank blu by BCA Digital";
-  const statusLabel = paymentWasChecked
-    ? (o.payment_status === "LUNAS" ? "LUNAS" : "DP")
-    : (o.payment_plan === "FULL" ? "LUNAS" : "DP");
+  const statusLabel = o.customer_payment_status || (o.payment_plan === "FULL" ? "LUNAS" : "DP");
   const statusClass = statusLabel === "LUNAS" ? "paid" : "dp";
   const itemRows = items.map(item => {
-    const category = item.product_category === "TSHIRT" ? "Kaos" : item.product_category === "JACKET" ? "Jaket" : "Merchandise";
+    const category = productCategoryLabel(item.product_category, getOrderItemApparelType(item));
     const qty = Number(item.quantity || 0);
     const price = Number(item.unit_price || 0);
     const subtotal = Number(item.subtotal ?? price * qty);
@@ -795,6 +978,67 @@ async function viewProof(id) {
   $("#proofBody").innerHTML = /\.pdf$/i.test(o.payment_proof_path)
     ? `<iframe class="proof-frame" src="${escapeHtml(data.signedUrl)}" title="Bukti pembayaran"></iframe><a class="btn primary" href="${escapeHtml(data.signedUrl)}" target="_blank" rel="noreferrer">Buka PDF</a>`
     : `<img class="proof-image" src="${escapeHtml(data.signedUrl)}" alt="Bukti pembayaran">`;
+}
+
+async function viewOrderPaymentProof(orderId, paymentId) {
+  const order = orders.find(x => x.id === orderId);
+  const payment = order?.order_payments?.find(x => x.id === paymentId);
+  if (!payment?.proof_path) return;
+  $("#proofModal").classList.remove("hidden");
+  $("#proofBody").innerHTML = `<div class="loading">Memuat bukti pembayaran...</div>`;
+  const bucket = payment.payment_type === "SETTLEMENT" ? "settlement-proofs" : "payment-proofs";
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(payment.proof_path, 600);
+  if (error) {
+    $("#proofBody").innerHTML = `<div class="admin-message error">${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  $("#proofBody").innerHTML = /\.pdf$/i.test(payment.proof_path)
+    ? `<iframe class="proof-frame" src="${escapeHtml(data.signedUrl)}" title="Bukti pembayaran"></iframe><a class="btn primary" href="${escapeHtml(data.signedUrl)}" target="_blank" rel="noreferrer">Buka PDF</a>`
+    : `<img class="proof-image" src="${escapeHtml(data.signedUrl)}" alt="Bukti pembayaran">`;
+}
+
+
+async function viewSettlementProofPath(orderId) {
+  const order = orders.find(x => x.id === orderId);
+  if (!order?.settlement_proof_path) return;
+  $("#proofModal").classList.remove("hidden");
+  $("#proofBody").innerHTML = `<div class="loading">Memuat bukti pelunasan...</div>`;
+  const { data, error } = await supabase.storage.from("settlement-proofs").createSignedUrl(order.settlement_proof_path, 600);
+  if (error) {
+    $("#proofBody").innerHTML = `<div class="admin-message error">${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  $("#proofBody").innerHTML = /\.pdf$/i.test(order.settlement_proof_path)
+    ? `<iframe class="proof-frame" src="${escapeHtml(data.signedUrl)}" title="Bukti pelunasan"></iframe><a class="btn primary" href="${escapeHtml(data.signedUrl)}" target="_blank" rel="noreferrer">Buka PDF</a>`
+    : `<img class="proof-image" src="${escapeHtml(data.signedUrl)}" alt="Bukti pelunasan">`;
+}
+
+async function saveInternalPaymentCheck(orderId, paymentId, mode) {
+  const order = orders.find(x => x.id === orderId);
+  const payment = order?.order_payments?.find(x => x.id === paymentId);
+  if (!payment) return;
+  const status = document.querySelector(`[data-internal-status="${paymentId}"]`)?.value || "PENDING";
+  const reportedAmount = Number(document.querySelector(`[data-reported-amount="${paymentId}"]`)?.value);
+  const note = document.querySelector(`[data-internal-note="${paymentId}"]`)?.value.trim() || null;
+  if (!Number.isInteger(reportedAmount) || reportedAmount <= 0) {
+    msg("Nominal yang dicek harus berupa angka bulat lebih dari 0.", "error");
+    return;
+  }
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await supabase.from("order_payments").update({
+    reported_amount: reportedAmount,
+    internal_status: status,
+    internal_note: note,
+    checked_at: status === "PENDING" ? null : new Date().toISOString(),
+    checked_by: status === "PENDING" ? null : user?.id || null
+  }).eq("id", paymentId);
+  if (error) {
+    msg(`Gagal menyimpan pengecekan internal: ${error.message}`, "error");
+    return;
+  }
+  await loadOrders();
+  renderOrdersPage(mode);
+  msg(`Pengecekan ${order.invoice_no} berhasil disimpan. Status invoice customer tidak berubah.`, "success");
 }
 
 function closeProof() {
@@ -1005,20 +1249,21 @@ function orderRows(list) {
         getOrderPaymentSummary(o).total, getOrderPaymentSummary(o).due, getOrderPaymentSummary(o).paid,
         getOrderPaymentSummary(o).remaining, getOrderPaymentSummary(o).statusLabel,
         o.payment_proof_path ? "Ada" : "Belum",
-        i.product_name, productCategoryLabel(i.product_category), i.size || "", Number(i.quantity || 0)
+        i.product_name, productCategoryLabel(i.product_category, getOrderItemApparelType(i)), i.size || "", Number(i.quantity || 0)
       ]);
     }
   }
   return rows;
 }
 function exportAllOrders() {
-  const apparel=orders.filter(o=>orderHasCategory(o,["TSHIRT","JACKET"]));
+  const apparel=orders.filter(o=>orderHasCategory(o,["APPAREL","TSHIRT","JACKET"]));
   const merch=orders.filter(o=>orderHasCategory(o,["MERCHANDISE"]));
   const sizeMap = new Map();
   for (const o of apparel) {
     for (const i of o.order_items || []) {
-      if (!["TSHIRT","JACKET"].includes(i.product_category) || !i.size) continue;
-      const key=`${productCategoryLabel(i.product_category)}|${i.size}`;
+      const apparelType = getOrderItemApparelType(i);
+      if (!apparelType || !i.size) continue;
+      const key=`${productCategoryLabel("APPAREL", apparelType)}|${i.size}`;
       sizeMap.set(key,(sizeMap.get(key)||0)+Number(i.quantity||0));
     }
   }
@@ -1026,7 +1271,7 @@ function exportAllOrders() {
   [...sizeMap.entries()].sort().forEach(([key,n])=>sizeRows.push([...key.split("|"),n]));
   const orderOverview=[["Invoice","Tanggal","Customer","Email","HP","Pengiriman","Rencana","Metode","Subtotal","Kode Promo","Diskon","Total Akhir","Dibayar / Rencana","Sisa / Rencana","Status tampilan","Kategori Order"]];
   for(const o of orders){
-    const cats=[...new Set((o.order_items||[]).map(i=>productCategoryLabel(i.product_category)))].join(", ");
+    const cats=[...new Set((o.order_items||[]).map(i=>productCategoryLabel(i.product_category, getOrderItemApparelType(i))))].join(", ");
     const payment = getOrderPaymentSummary(o);
     orderOverview.push([o.invoice_no,formatDate(o.created_at),o.customer_name,o.customer_email||"",o.customer_phone||o.customer_contact||"",o.delivery_method==="SHIP_TO_ADDRESS"?"Dikirim":"Booth CF24",o.payment_plan==="FULL"?"Full Payment":"DP",o.payment_method==="QRIS"?"QRIS":"Transfer BCA",Number(o.subtotal_amount ?? payment.total),o.promo_code||"",Number(o.discount_amount||0),payment.total,payment.paid,payment.remaining,payment.statusLabel,cats]);
   }
@@ -1045,18 +1290,79 @@ function exportAllOrders() {
   msg("Export Excel berhasil dibuat.","success");
 }
 
+
+// apparelTypesPagePatch: pindahkan panel pengelolaan jenis apparel ke tab khusus.
+function findApparelTypesPanel() {
+  const root = $("#pageContent");
+  if (!root) return null;
+  const heading = [...root.querySelectorAll("h1,h2,h3,h4,h5")]
+    .find(el => /jenis\s+apparel/i.test((el.textContent || "").trim()));
+  if (!heading) return null;
+  return heading.closest(".panel-card") || heading.closest("section") || heading.parentElement;
+}
+
+function removeApparelTypesPanel() {
+  findApparelTypesPanel()?.remove();
+}
+
+
+function renderApparelTypesPage() {
+  renderProductsPage();
+
+  const root = $("#pageContent");
+  const panel = findApparelTypesPanel();
+
+  if (!panel) {
+    root.innerHTML = `
+      <div class="admin-message error">
+        Panel Jenis Apparel tidak ditemukan pada halaman Produk.
+      </div>`;
+    return;
+  }
+
+  const heading = document.createElement("section");
+  heading.className = "page-title-row";
+  heading.innerHTML = `
+    <div>
+      <h1>PENGELOLAAN KATEGORI</h1>
+      <p class="muted"><strong>Jenis Apparel</strong></p>
+      <p class="muted">Tambah jenis pakaian tanpa mengubah kode website.</p>
+    </div>
+  `;
+
+// Hapus seluruh heading panel bawah.
+// Form tambah jenis dan daftar jenis apparel tetap dipertahankan.
+const panelHeading = panel.querySelector(".panel-head");
+if (panelHeading) {
+  panelHeading.remove();
+}
+
+  const layout = document.createElement("div");
+  layout.className = "apparel-types-page-layout";
+
+  panel.classList.add("apparel-types-panel");
+  layout.append(panel);
+
+  root.replaceChildren(heading, layout);
+}
+
+
 async function renderPage() {
-  if (page === "products") {
-    await Promise.all([loadProducts(),loadOrders()]);
+  if (page === "apparelTypes") {
+    await Promise.all([loadProducts(), loadOrders(), loadApparelTypes()]);
+    renderApparelTypesPage();
+  } else if (page === "products") {
+    await Promise.all([loadProducts(),loadOrders(),loadApparelTypes()]);
     renderProductsPage();
+    removeApparelTypesPanel();
   } else if (page === "allOrders") {
-    await Promise.all([loadOrders(),loadSettings()]);
+    await Promise.all([loadOrders(),loadSettings(),loadApparelTypes()]);
     renderOrdersPage("all");
   } else if (page === "merchandise") {
-    await Promise.all([loadOrders(),loadSettings()]);
+    await Promise.all([loadOrders(),loadSettings(),loadApparelTypes()]);
     renderOrdersPage("merchandise");
   } else if (page === "apparel") {
-    await Promise.all([loadOrders(),loadSettings()]);
+    await Promise.all([loadOrders(),loadSettings(),loadApparelTypes()]);
     renderOrdersPage("apparel");
   } else {
     await loadSettings();

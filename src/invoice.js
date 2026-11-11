@@ -12,7 +12,7 @@ const DEFAULT_SETTINGS = {
   logo_url: "",
   primary_color: "#111111",
   accent_color: "#777777",
-  dp_percentage: 50
+  dp_percentage: 50,
 };
 
 function readSession(key) {
@@ -64,11 +64,8 @@ function paymentMethodText(order) {
 }
 
 function paymentStatusText(order) {
-  // Full Payment tampil sebagai LUNAS langsung pada invoice customer.
-  // DP tetap menggunakan status pengecekan saat serah-terima.
-  return order.payment_plan === "FULL"
-    ? "LUNAS"
-    : "DP";
+  // Status invoice mengikuti laporan customer, terpisah dari verifikasi internal.
+  return order.customer_payment_status || (order.payment_plan === "FULL" ? "LUNAS" : "DP");
 }
 
 async function loadSiteSettings() {
@@ -152,8 +149,9 @@ function renderInvoice({ order, items }, settings) {
   // Invoice is issued immediately using the customer's chosen plan.
   // The admin checks the transfer/proof at pickup or delivery; we do not wait
   // for that check before showing the planned amount on the customer invoice.
-  const paidAmount = paymentDue;
-  const remainingAmount = Math.max(totalAmount - paymentDue, 0);
+  const isCustomerPaid = paymentStatusText(order) === "LUNAS";
+  const paidAmount = isCustomerPaid ? totalAmount : paymentDue;
+  const remainingAmount = isCustomerPaid ? 0 : Math.max(totalAmount - paymentDue, 0);
 
   const warningHtml = warning
     ? `<div class="invoice-notice invoice-notice-error invoice-screen-only"><strong>Perhatian:</strong> ${escapeHtml(warning)}</div>`
@@ -269,7 +267,7 @@ function renderInvoice({ order, items }, settings) {
                   <span>Tanggal</span>
                   <strong>${safeDate(order.created_at)}</strong>
                 </div>
-                <span class="invoice-status ${order.payment_plan === "FULL" || order.payment_status === "LUNAS" ? "is-paid" : ""}">${escapeHtml(paymentStatusText(order))}</span>
+                <span class="invoice-status ${(order.customer_payment_status || (order.payment_plan === "FULL" ? "LUNAS" : "DP")) === "LUNAS" ? "is-paid" : ""}">${escapeHtml(paymentStatusText(order))}</span>
               </div>
             </div>
 
@@ -280,8 +278,8 @@ function renderInvoice({ order, items }, settings) {
                 <span class="label">Pemesan</span>
                 <strong>${escapeHtml(order.customer_name || "-")}</strong>
                 <p>
-                  ${escapeHtml(order.customer_email || "-")}<br>
-                  ${escapeHtml(order.customer_phone || order.customer_contact || "-")}
+                  <span class="muted"></span> ${escapeHtml(order.customer_email || "-")}<br>
+                  <span class="muted"></span> ${escapeHtml(order.customer_phone || order.customer_contact || "-")}
                 </p>
               </div>
 
@@ -340,16 +338,15 @@ function renderInvoice({ order, items }, settings) {
 
                     <span>Metode</span>
                     <strong>${escapeHtml(paymentMethodText(order))}</strong>
-
-                    <span>Bukti</span>
-                    <strong>${order.proof_uploaded ? "✓ Berhasil diunggah" : "⚠ Perlu pengecekan admin"}</strong>
                   </div>
                 </div>
 
                 <div class="invoice-note">
                   ${order.payment_plan === "FULL"
                     ? "Full Payment dipilih. Status invoice langsung LUNAS. Simpan invoice ini sebagai bukti pemesanan."
-                    : "Rencana pembayaran DP dipilih. Nominal DP dan sisa pembayaran mengikuti pilihan saat checkout; bukti pembayaran akan dicocokkan admin saat pengambilan atau pengiriman."}
+                    : isCustomerPaid
+                      ? "Bukti pelunasan telah dikirim. Status invoice mengikuti laporan customer; pengecekan nominal tetap dilakukan admin."
+                      : "Rencana pembayaran DP dipilih. Nominal DP dan sisa pembayaran mengikuti pilihan saat checkout; bukti pembayaran akan dicocokkan admin saat pengambilan atau pengiriman."}
                 </div>
               </div>
 
@@ -372,7 +369,7 @@ function renderInvoice({ order, items }, settings) {
                   <strong>${money(totalAmount)}</strong>
                 </div>
                 <div class="summary-row">
-                  <span>Nominal pembayaran dipilih</span>
+                  <span>Dibayar</span>
                   <strong>${money(paidAmount)}</strong>
                 </div>
                 <div class="summary-row grand">

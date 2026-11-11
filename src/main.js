@@ -22,7 +22,7 @@ let settings = {
 let floatingNoticeTimer = null;
 
 const $ = id => document.getElementById(id);
-const isApparel = p => p?.category === "TSHIRT" || p?.category === "JACKET";
+const isApparel = p => p?.category === "APPAREL" || p?.category === "TSHIRT" || p?.category === "JACKET";
 const cartTotal = () => cart.reduce((sum, item) => sum + Number(item.price) * item.qty, 0);
 
 function readCart() {
@@ -305,7 +305,7 @@ app.innerHTML = `
     <div class="brand" id="siteName">CIRCLE ITABAKA</div>
     <div class="muted" id="siteTitle">Pre-Order CF24</div>
   </div>
-  <button class="secondary cart-trigger" id="cartButton" type="button">Keranjang <span id="cartCount">0</span></button>
+  <div class="catalog-header-actions"><a class="secondary order-lookup-link" href="order-status.html">Cek Pesanan</a><button class="secondary cart-trigger" id="cartButton" type="button">Keranjang <span id="cartCount">0</span></button></div>
 </header>
 
 <main>
@@ -377,3 +377,8 @@ document.addEventListener("keydown", event => {
 
 await Promise.all([loadSettings(), loadProducts()]);
 renderCart();
+
+// Keep the customer navigation comfortable on narrow screens.
+const headerStyle = document.createElement("style");
+headerStyle.textContent = `.catalog-header-actions{display:flex;align-items:center;gap:9px}.order-lookup-link{display:inline-flex;align-items:center;text-decoration:none;font-size:13px}@media(max-width:520px){.catalog-header-actions{gap:6px}.order-lookup-link{padding:9px 10px;font-size:12px}.cart-trigger{padding:9px 10px;font-size:12px}}`;
+document.head.append(headerStyle);

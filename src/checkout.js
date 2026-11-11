@@ -183,10 +183,9 @@ function renderShell() {
             </label>
 
             <section class="promo-entry-card" aria-labelledby="promoHeading">
-              <h3 id="promoHeading">Promo Member</h3>
-              <p class="muted small">Masukkan nomor polisi kendaraan yang terdaftar untuk mendapatkan diskon member.</p>
+              <h3 id="promoHeading">Voucher</h3>
               <div class="promo-entry-row">
-                <input id="promoCode" type="text" maxlength="20" autocomplete="off" placeholder="Diskon Dari Akane" aria-label="Kode promo member">
+                <input id="promoCode" type="text" maxlength="20" autocomplete="off" placeholder="Voucher Dari Akane" aria-label="Kode promo member">
                 <button id="applyPromo" class="secondary" type="button">Gunakan Kode</button>
               </div>
               <div id="promoFeedback" class="promo-feedback" aria-live="polite"></div>
@@ -211,7 +210,7 @@ function renderShell() {
           <div class="summary-header"><h3>Ringkasan Pesanan</h3></div>
           <div id="summaryItems"></div>
           <div class="total-row"><span>Subtotal</span><strong id="subtotalAmount">Rp0</strong></div>
-          <div class="total-row" id="promoDiscountRow" hidden><span>Diskon Member</span><strong id="promoDiscountAmount">-Rp0</strong></div>
+          <div class="total-row" id="promoDiscountRow" hidden><span>Voucher</span><strong id="promoDiscountAmount">-Rp0</strong></div>
           <div class="total-row"><span>Total Akhir</span><strong id="grandTotal">Rp0</strong></div>
           <div class="total-row"><span>Bayar sekarang</span><strong id="paymentDue">Rp0</strong></div>
           <p class="muted small">Nominal “Bayar sekarang” mengikuti pilihan DP atau Full Payment.</p>
@@ -261,6 +260,12 @@ function renderSummary() {
   $("grandTotal").textContent = formatRupiah(finalTotal());
   $("paymentDue").textContent = formatRupiah(paymentDue());
   const discountRow = $("promoDiscountRow");
+const showVoucher = promoState.valid && promoState.discount_amount > 0;
+
+if (discountRow) {
+  discountRow.hidden = !showVoucher;
+  discountRow.style.display = showVoucher ? "flex" : "none";
+}
   if (discountRow) discountRow.hidden = !(promoState.valid && promoState.discount_amount > 0);
   if ($("promoDiscountAmount")) $("promoDiscountAmount").textContent = `-${formatRupiah(promoState.discount_amount)}`;
 
@@ -440,7 +445,10 @@ async function applyPromoCode() {
   try {
     const { data, error } = await supabase.rpc("preview_public_promo", {
       p_code: code,
-      p_subtotal: total()
+      p_items: cart.map(item => ({
+        product_id: item.id,
+        quantity: item.qty
+      }))
     });
     if (error) throw error;
     if (!data?.valid) {
