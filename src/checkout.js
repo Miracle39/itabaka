@@ -17,6 +17,7 @@ let settings = {
   dp_percentage: 50
 };
 let currentStep = 1;
+let promoState = { code: "", valid: false, discount_amount: 0, member_name: "" };
 
 const $ = id => document.getElementById(id);
 const total = () => cart.reduce((sum, item) => sum + Number(item.price) * item.qty, 0);
@@ -39,8 +40,21 @@ function showNotice(message, type = "") {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+function finalTotal() {
+  return Math.max(0, total() - Number(promoState.discount_amount || 0));
+}
+
+function showPromoPopup(message, type = "success") {
+  const root = $("promoPopupRoot");
+  if (!root) return;
+  root.innerHTML = `<div class="promo-popup-backdrop"><section class="promo-popup-card ${type}" role="dialog" aria-modal="true" aria-labelledby="promoPopupTitle"><h3 id="promoPopupTitle">${type === "success" ? "Promo berhasil" : "Promo tidak dapat digunakan"}</h3><p>${escapeHtml(message)}</p><button class="primary" id="closePromoPopup" type="button">Mengerti</button></section></div>`;
+  const close = () => root.replaceChildren();
+  $("closePromoPopup").onclick = close;
+  root.querySelector(".promo-popup-backdrop").addEventListener("click", event => { if (event.target.classList.contains("promo-popup-backdrop")) close(); });
+}
+
 function paymentDue() {
-  const totalAmount = total();
+  const totalAmount = finalTotal();
   return $("paymentPlan").value === "FULL"
     ? totalAmount
     : Math.min(
@@ -72,6 +86,18 @@ function renderShell() {
   <style>
     .field-feedback{display:block;color:#b91c1c;font-size:12px;font-weight:600;line-height:1.4;margin:5px 0 0}
     .field-feedback.hidden{display:none!important}
+    .promo-entry-card{border:1px solid #e6e6e6;border-radius:14px;padding:16px;margin:16px 0;background:#fcfcfc}
+    .promo-entry-card h3{margin:0 0 5px;font-size:15px}
+    .promo-entry-row{display:flex;gap:9px;margin-top:10px}
+    .promo-entry-row input{flex:1;min-width:0;text-transform:uppercase}
+    .promo-feedback{font-size:12px;margin-top:8px;color:#666}
+    .promo-feedback.success{color:#16713a;font-weight:700}
+    .promo-feedback.error{color:#b42318;font-weight:700}
+    @media(max-width:520px){.promo-entry-row{flex-direction:column}.promo-entry-row button{width:100%}}
+    .promo-popup-backdrop{position:fixed;inset:0;background:rgba(15,15,15,.48);display:grid;place-items:center;padding:18px;z-index:9999}
+    .promo-popup-card{width:min(390px,100%);background:#fff;border-radius:18px;padding:23px;box-shadow:0 25px 80px rgba(0,0,0,.22)}
+    .promo-popup-card h3{margin:0 0 8px;font-size:18px}.promo-popup-card p{color:#555;line-height:1.55;margin:0 0 18px}.promo-popup-card.success h3{color:#16713a}.promo-popup-card.error h3{color:#b42318}
+    .promo-popup-card button{width:100%}
   </style>
   <header class="topbar">
     <a class="brand-link" href="index.html">← Kembali ke Produk</a>
@@ -92,6 +118,7 @@ function renderShell() {
       </div>
 
       <div id="notice"></div>
+      <div id="promoPopupRoot"></div>
 
       <div class="stepper">
         <div class="step active" data-step-indicator="1"><span>1</span><strong>Data Pemesan</strong></div>
@@ -155,6 +182,16 @@ function renderShell() {
               </select>
             </label>
 
+            <section class="promo-entry-card" aria-labelledby="promoHeading">
+              <h3 id="promoHeading">Promo Member</h3>
+              <p class="muted small">Masukkan nomor polisi kendaraan yang terdaftar untuk mendapatkan diskon member.</p>
+              <div class="promo-entry-row">
+                <input id="promoCode" type="text" maxlength="20" autocomplete="off" placeholder="Diskon Dari Akane" aria-label="Kode promo member">
+                <button id="applyPromo" class="secondary" type="button">Gunakan Kode</button>
+              </div>
+              <div id="promoFeedback" class="promo-feedback" aria-live="polite"></div>
+            </section>
+
             <div id="paymentInfo" class="payment-box"></div>
 
             <label>Bukti Pembayaran
@@ -173,7 +210,9 @@ function renderShell() {
         <aside id="checkoutSummary" class="card summary-card checkout-summary-card hidden">
           <div class="summary-header"><h3>Ringkasan Pesanan</h3></div>
           <div id="summaryItems"></div>
-          <div class="total-row"><span>Total</span><strong id="grandTotal">Rp0</strong></div>
+          <div class="total-row"><span>Subtotal</span><strong id="subtotalAmount">Rp0</strong></div>
+          <div class="total-row" id="promoDiscountRow" hidden><span>Diskon Member</span><strong id="promoDiscountAmount">-Rp0</strong></div>
+          <div class="total-row"><span>Total Akhir</span><strong id="grandTotal">Rp0</strong></div>
           <div class="total-row"><span>Bayar sekarang</span><strong id="paymentDue">Rp0</strong></div>
           <p class="muted small">Nominal “Bayar sekarang” mengikuti pilihan DP atau Full Payment.</p>
         </aside>
@@ -201,6 +240,7 @@ function restoreDraft() {
   $("customerAddress").value = draft.customerAddress || "";
   $("paymentPlan").value = draft.paymentPlan || "DP";
   $("paymentMethod").value = draft.paymentMethod || "QRIS";
+  $("promoCode").value = draft.promoCode || "";
 }
 
 function saveDraft() {
@@ -211,13 +251,18 @@ function saveDraft() {
     deliveryMethod: $("deliveryMethod").value,
     customerAddress: $("customerAddress").value,
     paymentPlan: $("paymentPlan").value,
-    paymentMethod: $("paymentMethod").value
+    paymentMethod: $("paymentMethod").value,
+    promoCode: $("promoCode")?.value || ""
   });
 }
 
 function renderSummary() {
-  $("grandTotal").textContent = formatRupiah(total());
+  $("subtotalAmount").textContent = formatRupiah(total());
+  $("grandTotal").textContent = formatRupiah(finalTotal());
   $("paymentDue").textContent = formatRupiah(paymentDue());
+  const discountRow = $("promoDiscountRow");
+  if (discountRow) discountRow.hidden = !(promoState.valid && promoState.discount_amount > 0);
+  if ($("promoDiscountAmount")) $("promoDiscountAmount").textContent = `-${formatRupiah(promoState.discount_amount)}`;
 
   $("summaryItems").innerHTML = cart.length
     ? cart.map(item => `
@@ -296,6 +341,7 @@ function validateCustomerData() {
 
 function renderPaymentInfo() {
   const due = paymentDue();
+  const payableTotal = finalTotal();
   const planLabel =
     $("paymentPlan").value === "FULL"
       ? "Full Payment"
@@ -304,6 +350,7 @@ function renderPaymentInfo() {
   if ($("paymentMethod").value === "QRIS") {
     $("paymentInfo").innerHTML = `
       <strong>${escapeHtml(planLabel)}</strong>
+      <p class="small">Total setelah diskon: <strong>${formatRupiah(payableTotal)}</strong></p>
       <p class="small">Bayar sekarang: <strong>${formatRupiah(due)}</strong></p>
       ${settings.qris_image_url
         ? `<img src="${escapeHtml(settings.qris_image_url)}" alt="QRIS">`
@@ -313,6 +360,7 @@ function renderPaymentInfo() {
   } else {
     $("paymentInfo").innerHTML = `
       <strong>${escapeHtml(planLabel)}</strong>
+      <p class="small">Total setelah diskon: <strong>${formatRupiah(payableTotal)}</strong></p>
       <p class="small">Bayar sekarang: <strong>${formatRupiah(due)}</strong></p>
       <p class="small">
         Bank: <strong>blu by BCA Digital</strong><br>
@@ -376,6 +424,54 @@ async function uploadProof(orderId, proofToken, file) {
   return path;
 }
 
+async function applyPromoCode() {
+  const input = $("promoCode");
+  const button = $("applyPromo");
+  const code = (input?.value || "").trim().toUpperCase().replace(/\s+/g, " ");
+  promoState = { code: "", valid: false, discount_amount: 0, member_name: "" };
+  if (!code) {
+    $("promoFeedback").textContent = "Masukkan nomor polisi member terlebih dahulu.";
+    $("promoFeedback").className = "promo-feedback error";
+    renderSummary(); renderPaymentInfo(); saveDraft();
+    return;
+  }
+  button.disabled = true;
+  button.textContent = "Memeriksa...";
+  try {
+    const { data, error } = await supabase.rpc("preview_public_promo", {
+      p_code: code,
+      p_subtotal: total()
+    });
+    if (error) throw error;
+    if (!data?.valid) {
+      $("promoFeedback").textContent = data?.message || "Kode promo tidak valid atau sudah digunakan.";
+      $("promoFeedback").className = "promo-feedback error";
+      showPromoPopup(data?.message || "Kode promo tidak valid atau sudah digunakan.", "error");
+    } else {
+      promoState = {
+        code: data.code || code,
+        valid: true,
+        discount_amount: Math.min(total(), Math.max(0, Number(data.discount_amount || 0))),
+        member_name: data.member_name || ""
+      };
+      input.value = promoState.code;
+      $("promoFeedback").textContent = `Promo berhasil digunakan${promoState.member_name ? ` untuk ${promoState.member_name}` : ""}. Diskon ${formatRupiah(promoState.discount_amount)}.`;
+      $("promoFeedback").className = "promo-feedback success";
+      showPromoPopup(`Diskon ${formatRupiah(promoState.discount_amount)} berhasil diterapkan pada pesanan.`, "success");
+    }
+  } catch (error) {
+    $("promoFeedback").textContent = `Gagal memeriksa promo: ${error.message}`;
+    $("promoFeedback").className = "promo-feedback error";
+    showPromoPopup(`Gagal memeriksa promo: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Gunakan Kode";
+    renderSummary();
+    renderPaymentInfo();
+    saveDraft();
+  }
+}
+
 async function submitOrder(event) {
   event.preventDefault();
   if (currentStep !== 2) return;
@@ -410,30 +506,46 @@ async function submitOrder(event) {
     return;
   }
 
+  if ($("promoCode").value.trim() && !promoState.valid) {
+    await applyPromoCode();
+    if (!promoState.valid) {
+      showNotice("Kode promo belum berhasil diterapkan. Periksa kembali kode member.", "error");
+      return;
+    }
+  }
+
   $("submitButton").disabled = true;
   showNotice("Membuat PO dan mengunggah bukti pembayaran...");
 
   const deliveryMethod = $("deliveryMethod").value;
   const address = $("customerAddress").value.trim();
 
-  const { data, error } = await supabase.rpc("create_public_order", {
-    p_customer_name: $("customerName").value.trim(),
-    p_customer_email: $("customerEmail").value.trim(),
-    p_customer_address: deliveryMethod === "SHIP_TO_ADDRESS" ? address : null,
-    p_customer_phone: $("customerPhone").value.trim(),
-    p_delivery_method: deliveryMethod,
-    p_payment_plan: $("paymentPlan").value,
-    p_payment_method: $("paymentMethod").value,
-    p_items: cart.map(item => ({
-      product_id: item.id,
-      quantity: item.qty,
-      size: item.size || null
-    }))
-  });
-
-  if (error) {
+  let data;
+  try {
+    const result = await supabase.rpc("create_public_order", {
+      p_customer_name: $("customerName").value.trim(),
+      p_customer_email: $("customerEmail").value.trim(),
+      p_customer_address: deliveryMethod === "SHIP_TO_ADDRESS" ? address : null,
+      p_customer_phone: $("customerPhone").value.trim(),
+      p_delivery_method: deliveryMethod,
+      p_payment_plan: $("paymentPlan").value,
+      p_payment_method: $("paymentMethod").value,
+      p_promo_code: promoState.valid ? promoState.code : null,
+      p_items: cart.map(item => ({
+        product_id: item.id,
+        quantity: item.qty,
+        size: item.size || null
+      }))
+    });
+    if (result.error) throw result.error;
+    data = result.data;
+    if (!data?.id || !data?.proof_token) {
+      throw new Error("Respons server tidak lengkap (ID pesanan atau token bukti tidak ditemukan). Pesanan belum dapat dilanjutkan.");
+    }
+  } catch (error) {
+    console.error("create_public_order failed:", error);
     $("submitButton").disabled = false;
-    showNotice("PO gagal dibuat: " + error.message, "error");
+    showNotice("PO gagal dibuat: " + (error?.message || "Terjadi kesalahan koneksi."), "error");
     return;
   }
 
@@ -479,6 +591,19 @@ function bindEvents() {
   $("paymentPlan").addEventListener("change", () => { saveDraft(); renderPaymentInfo(); renderSummary(); });
   $("paymentMethod").addEventListener("change", () => { saveDraft(); renderPaymentInfo(); });
   $("paymentProofFile").addEventListener("change", previewProof);
+  $("applyPromo").addEventListener("click", applyPromoCode);
+  $("promoCode").addEventListener("keydown", event => {
+    if (event.key === "Enter") { event.preventDefault(); applyPromoCode(); }
+  });
+  $("promoCode").addEventListener("input", () => {
+    if (promoState.valid && $("promoCode").value.trim().toUpperCase() !== promoState.code) {
+      promoState = { code: "", valid: false, discount_amount: 0, member_name: "" };
+      $("promoFeedback").textContent = "Kode berubah. Gunakan kembali kode untuk menerapkan diskon.";
+      $("promoFeedback").className = "promo-feedback";
+      renderSummary(); renderPaymentInfo();
+    }
+    saveDraft();
+  });
 
   ["customerEmail", "customerAddress"].forEach(id => {
     $(id).addEventListener("input", saveDraft);

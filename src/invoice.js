@@ -24,6 +24,21 @@ function readSession(key) {
   }
 }
 
+
+function showInvoiceNotice(message) {
+  const root = document.createElement("div");
+  root.className = "invoice-popup-backdrop";
+  root.setAttribute("role", "presentation");
+  root.innerHTML = `<section class="invoice-popup-card" role="dialog" aria-modal="true" aria-labelledby="invoicePopupTitle"><h3 id="invoicePopupTitle">Tidak dapat membuka cetak invoice</h3><p>${escapeHtml(message)}</p><button type="button" class="invoice-popup-close">Mengerti</button></section>`;
+  const style = document.createElement("style");
+  style.textContent = ".invoice-popup-backdrop{position:fixed;inset:0;z-index:10000;background:rgba(15,15,15,.5);display:grid;place-items:center;padding:18px}.invoice-popup-card{width:min(420px,100%);background:#fff;border-radius:16px;padding:22px;box-shadow:0 20px 70px rgba(0,0,0,.22);font-family:Arial,sans-serif}.invoice-popup-card h3{margin:0 0 8px;font-size:18px}.invoice-popup-card p{color:#555;line-height:1.5}.invoice-popup-card button{width:100%;border:0;border-radius:9px;padding:11px 14px;background:#151515;color:#fff;font-weight:700;cursor:pointer}";
+  document.head.append(style);
+  document.body.append(root);
+  const close = () => { root.remove(); style.remove(); };
+  root.querySelector(".invoice-popup-close").addEventListener("click", close);
+  root.addEventListener("click", event => { if (event.target === root) close(); });
+}
+
 function safeDate(value) {
   try {
     return formatDate(value);
@@ -107,9 +122,14 @@ function renderInvoice({ order, items }, settings) {
   }, 0);
 
   const storedTotal = Number(order.total_amount);
-  const totalAmount = Number.isFinite(storedTotal) && storedTotal > 0
+  const totalAmount = Number.isFinite(storedTotal) && storedTotal >= 0
     ? storedTotal
     : itemsTotal;
+  const subtotalAmount = Number.isFinite(Number(order.subtotal_amount))
+    ? Number(order.subtotal_amount)
+    : itemsTotal;
+  const discountAmount = Math.max(0, Number(order.discount_amount || 0));
+  const promoCode = String(order.promo_code || "");
 
   // Prefer the DP percentage saved by checkout, so later admin setting changes
   // do not retroactively change the amount due on this invoice.
@@ -122,9 +142,12 @@ function renderInvoice({ order, items }, settings) {
     : 50;
 
   // "Bayar Sekarang" follows the selected payment plan, not a missing/stale RPC field.
-  const paymentDue = order.payment_plan === "FULL"
-    ? totalAmount
-    : Math.min(totalAmount, Math.max(1, Math.ceil(totalAmount * dpPercentage / 100)));
+  const storedDue = Number(order.payment_amount_due);
+  const paymentDue = Number.isFinite(storedDue) && storedDue > 0
+    ? Math.min(totalAmount, storedDue)
+    : order.payment_plan === "FULL"
+      ? totalAmount
+      : Math.min(totalAmount, Math.max(1, Math.ceil(totalAmount * dpPercentage / 100)));
 
   // Invoice is issued immediately using the customer's chosen plan.
   // The admin checks the transfer/proof at pickup or delivery; we do not wait
@@ -181,6 +204,7 @@ function renderInvoice({ order, items }, settings) {
       .payment-detail span{color:#777}
       .invoice-summary{border:1px solid #dedede;border-radius:15px;padding:17px;background:#fafafa}
       .summary-row{display:flex;justify-content:space-between;gap:18px;padding:6px 0;font-size:12px}
+      .summary-row.discount{color:#16713a}
       .summary-row strong{font-weight:850}
       .summary-row.grand{margin-top:8px;padding-top:12px;border-top:2px solid var(--invoice-primary);font-size:14px}
       .summary-row.grand strong{font-size:18px}
@@ -331,11 +355,24 @@ function renderInvoice({ order, items }, settings) {
 
               <div class="invoice-summary">
                 <div class="summary-row">
+                  <span>Subtotal</span>
+                  <strong>${money(subtotalAmount)}</strong>
+                </div>
+                ${promoCode && discountAmount > 0 ? `
+                  <div class="summary-row">
+                    <span>Kode Promo</span>
+                    <strong>${escapeHtml(promoCode)}</strong>
+                  </div>
+                  <div class="summary-row discount">
+                    <span>Diskon Member</span>
+                    <strong>-${money(discountAmount)}</strong>
+                  </div>` : ""}
+                <div class="summary-row">
                   <span>Total Pesanan</span>
                   <strong>${money(totalAmount)}</strong>
                 </div>
                 <div class="summary-row">
-                  <span>Dibayar</span>
+                  <span>Nominal pembayaran dipilih</span>
                   <strong>${money(paidAmount)}</strong>
                 </div>
                 <div class="summary-row grand">
@@ -373,7 +410,7 @@ function printInvoiceDocument(order, settings) {
   const printWindow = window.open("", "_blank", "width=1000,height=900");
 
   if (!printWindow) {
-    alert("Popup cetak diblokir browser. Izinkan popup untuk halaman ini lalu coba lagi.");
+    showInvoiceNotice("Popup cetak diblokir browser. Izinkan popup untuk halaman ini lalu coba lagi.");
     return;
   }
 
@@ -422,6 +459,7 @@ function printInvoiceDocument(order, settings) {
     .payment-detail span{color:#777}
     .invoice-summary{border:1px solid #dedede;border-radius:3mm;padding:3.5mm;background:#fafafa}
     .summary-row{display:flex;justify-content:space-between;gap:4mm;padding:1.5mm 0;font-size:8.5px}
+    .summary-row.discount{color:#16713a}
     .summary-row.grand{margin-top:1mm;padding-top:2.5mm;border-top:1px solid var(--invoice-primary);font-size:9.5px}
     .summary-row.grand strong{font-size:12px}
     .invoice-note{margin-top:2.5mm;color:#777;font-size:7px;line-height:1.4}

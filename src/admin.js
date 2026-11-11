@@ -73,6 +73,7 @@ function hrefFor(target) {
     : target === "allOrders" ? "/admin-all-orders.html"
     : target === "merchandise" ? "/admin-orders.html"
     : target === "apparel" ? "/admin-apparel.html"
+    : target === "promos" ? "/admin-promos.html"
     : "/admin-settings.html";
 }
 
@@ -94,6 +95,7 @@ function shell(session) {
             ${nav("allOrders","Semua Order")}
             ${nav("merchandise","Merchandise")}
             ${nav("apparel","Kaos / Jaket")}
+            ${nav("promos","Promo Member")}
             ${nav("settings","Pengaturan")}
           </nav>
           <div class="header-actions">
@@ -129,7 +131,7 @@ async function loadOrders() {
     id,invoice_no,created_at,
     customer_name,customer_email,customer_contact,customer_phone,customer_address,
     delivery_method,payment_status,payment_plan,payment_method,
-    payment_amount_due,total_amount,paid_amount,remaining_amount,
+    payment_amount_due,total_amount,subtotal_amount,discount_amount,promo_code,paid_amount,remaining_amount,
     payment_proof_path,payment_proof_uploaded_at,payment_verified_at,
     order_items(
       id,product_id,product_name,product_category,size,unit_price,quantity,subtotal
@@ -614,6 +616,11 @@ function renderOrderDetail(o, mode) {
         return `<div class="detail-product-row"><span>${catText}${escapeHtml(i.product_name)}${i.size ? ` · Size ${escapeHtml(i.size)}`:""} × ${i.quantity}</span><strong>${formatRupiah(i.subtotal)}</strong></div>`;
       }).join("")}
     </div>
+    <div class="detail-products"><span>Ringkasan Tagihan</span>
+      <div class="detail-product-row"><span>Subtotal</span><strong>${formatRupiah(o.subtotal_amount ?? payment.total)}</strong></div>
+      ${Number(o.discount_amount || 0) > 0 ? `<div class="detail-product-row"><span>Promo ${escapeHtml(o.promo_code || "Member")}</span><strong>-${formatRupiah(o.discount_amount)}</strong></div>` : ""}
+      <div class="detail-product-row"><strong>Total setelah diskon</strong><strong>${formatRupiah(payment.total)}</strong></div>
+    </div>
   </div>`;
 }
 
@@ -713,13 +720,16 @@ function viewOrderInvoice(id) {
   // Open synchronously in the click handler so popup blockers are less likely to block it.
   const invoiceWindow = window.open("", "_blank");
   if (!invoiceWindow) {
-    alert("Popup invoice diblokir browser. Izinkan pop-up untuk halaman admin ini lalu coba lagi.");
+    msg("Popup invoice diblokir browser. Izinkan pop-up untuk halaman admin ini lalu coba lagi.", "error");
     return;
   }
 
   const items = o.order_items || [];
   const itemSum = items.reduce((sum, item) => sum + Number(item.subtotal ?? Number(item.unit_price || 0) * Number(item.quantity || 0)), 0);
   const total = Number(o.total_amount || itemSum);
+  const subtotal = Number(o.subtotal_amount ?? itemSum);
+  const discount = Number(o.discount_amount || 0);
+  const promoCode = String(o.promo_code || "");
   const dueFromPlan = o.payment_plan === "FULL"
     ? total
     : Math.min(total, Math.max(1, Math.ceil(total * Number(settings.dp_percentage || 50) / 100)));
@@ -764,7 +774,7 @@ function viewOrderInvoice(id) {
 <div class="info"><div class="info-card"><span class="label">Pemesan</span><strong>${escapeHtml(o.customer_name || "-")}</strong><p>${escapeHtml(o.customer_email || "-")}<br>${escapeHtml(o.customer_phone || o.customer_contact || "-")}</p></div><div class="info-card"><span class="label">Pengambilan / Pengiriman</span><strong>${o.delivery_method === "SHIP_TO_ADDRESS" ? "Dikirim ke alamat" : "Ambil di Booth CF24"}</strong><p>${o.delivery_method === "SHIP_TO_ADDRESS" ? escapeHtml(o.customer_address || "Alamat belum tersedia") : "Pesanan diambil di booth CF24."}</p></div></div>
 <div class="table-wrap"><table class="items"><thead><tr><th>Produk</th><th>Qty</th><th>Harga</th><th class="right">Subtotal</th></tr></thead><tbody>${itemRows || '<tr><td colspan="4">Tidak ada detail item</td></tr>'}</tbody></table></div>
 <div class="bottom"><div><div class="payment"><h3>Informasi Pembayaran</h3><div class="payrow"><span>Rencana</span><strong>${paymentPlan}</strong><span>Metode</span><strong>${paymentMethod}</strong><span>Status</span><strong>${statusLabel}</strong></div></div><div class="note">Nominal invoice mengikuti rencana pembayaran yang dipilih customer. Bukti dan nominal aktual diperiksa admin saat pengambilan/pengiriman.</div></div>
-<div class="summary"><div class="sumrow"><span>Total Pesanan</span><strong>${formatRupiah(total)}</strong></div><div class="sumrow"><span>Bayar Sekarang</span><strong>${formatRupiah(due)}</strong></div><div class="sumrow"><span>Dibayar / sesuai rencana</span><strong>${formatRupiah(paid)}</strong></div><div class="sumrow grand"><span>Sisa Pembayaran</span><strong>${formatRupiah(remaining)}</strong></div></div></div>
+<div class="summary"><div class="sumrow"><span>Subtotal</span><strong>${formatRupiah(subtotal)}</strong></div>${promoCode && discount > 0 ? `<div class="sumrow"><span>Kode Promo</span><strong>${escapeHtml(promoCode)}</strong></div><div class="sumrow"><span>Diskon Member</span><strong>-${formatRupiah(discount)}</strong></div>` : ""}<div class="sumrow"><span>Total Pesanan</span><strong>${formatRupiah(total)}</strong></div><div class="sumrow"><span>Bayar Sekarang</span><strong>${formatRupiah(due)}</strong></div><div class="sumrow"><span>Dibayar / sesuai rencana</span><strong>${formatRupiah(paid)}</strong></div><div class="sumrow grand"><span>Sisa Pembayaran</span><strong>${formatRupiah(remaining)}</strong></div></div></div>
 <div class="foot"><span><strong>${escapeHtml(settings.site_name || "Circle Itabaka")}</strong> · ${escapeHtml(settings.site_title || "Pre-Order CF24")}</span><span>Terima kasih sudah melakukan pre-order.</span></div>
 </div></article></body></html>`);
   invoiceWindow.document.close();
@@ -981,7 +991,7 @@ function makeXlsx(sheets) {
   return zipStore(files);
 }
 function orderRows(list) {
-  const rows=[["Invoice","Tanggal","Customer","Email","HP","Pengiriman","Alamat","Rencana Pembayaran","Metode","Total","Bayar Sekarang","Dibayar / Rencana","Sisa / Rencana","Status tampilan","Bukti","Produk","Kategori","Size","Qty"]];
+  const rows=[["Invoice","Tanggal","Customer","Email","HP","Pengiriman","Alamat","Rencana Pembayaran","Metode","Subtotal","Kode Promo","Diskon","Total Akhir","Bayar Sekarang","Dibayar / Rencana","Sisa / Rencana","Status tampilan","Bukti","Produk","Kategori","Size","Qty"]];
   for (const o of list) {
     for (const i of o.order_items || []) {
       rows.push([
@@ -991,6 +1001,7 @@ function orderRows(list) {
         o.customer_address || "",
         o.payment_plan === "FULL" ? "Full Payment" : "DP",
         o.payment_method === "QRIS" ? "QRIS" : "Transfer BCA",
+        Number(o.subtotal_amount ?? getOrderPaymentSummary(o).total), o.promo_code || "", Number(o.discount_amount || 0),
         getOrderPaymentSummary(o).total, getOrderPaymentSummary(o).due, getOrderPaymentSummary(o).paid,
         getOrderPaymentSummary(o).remaining, getOrderPaymentSummary(o).statusLabel,
         o.payment_proof_path ? "Ada" : "Belum",
@@ -1013,11 +1024,11 @@ function exportAllOrders() {
   }
   const sizeRows=[["Kategori","Size","Total Qty"]];
   [...sizeMap.entries()].sort().forEach(([key,n])=>sizeRows.push([...key.split("|"),n]));
-  const orderOverview=[["Invoice","Tanggal","Customer","Email","HP","Pengiriman","Rencana","Metode","Total","Dibayar / Rencana","Sisa / Rencana","Status tampilan","Kategori Order"]];
+  const orderOverview=[["Invoice","Tanggal","Customer","Email","HP","Pengiriman","Rencana","Metode","Subtotal","Kode Promo","Diskon","Total Akhir","Dibayar / Rencana","Sisa / Rencana","Status tampilan","Kategori Order"]];
   for(const o of orders){
     const cats=[...new Set((o.order_items||[]).map(i=>productCategoryLabel(i.product_category)))].join(", ");
     const payment = getOrderPaymentSummary(o);
-    orderOverview.push([o.invoice_no,formatDate(o.created_at),o.customer_name,o.customer_email||"",o.customer_phone||o.customer_contact||"",o.delivery_method==="SHIP_TO_ADDRESS"?"Dikirim":"Booth CF24",o.payment_plan==="FULL"?"Full Payment":"DP",o.payment_method==="QRIS"?"QRIS":"Transfer BCA",payment.total,payment.paid,payment.remaining,payment.statusLabel,cats]);
+    orderOverview.push([o.invoice_no,formatDate(o.created_at),o.customer_name,o.customer_email||"",o.customer_phone||o.customer_contact||"",o.delivery_method==="SHIP_TO_ADDRESS"?"Dikirim":"Booth CF24",o.payment_plan==="FULL"?"Full Payment":"DP",o.payment_method==="QRIS"?"QRIS":"Transfer BCA",Number(o.subtotal_amount ?? payment.total),o.promo_code||"",Number(o.discount_amount||0),payment.total,payment.paid,payment.remaining,payment.statusLabel,cats]);
   }
   const sheets=[
     {name:"Semua Order",rows:orderOverview},
