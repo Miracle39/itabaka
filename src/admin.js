@@ -686,8 +686,8 @@ function renderOrdersPage(mode) {
   const data = filteredOrders(mode);
   const isApparel = mode === "apparel";
   const isAllOrders = mode === "all";
-  const pageKicker = isAllOrders ? "SEMUA ORDER" : isApparel ? "KAOS / JAKET" : "MERCHANDISE";
-  const pageTitle = isAllOrders ? "Semua Order" : isApparel ? "Order Kaos / Jaket" : "Order Merchandise";
+  const pageKicker = isAllOrders ? "SEMUA ORDER" : isApparel ? "APPAREL'S" : "MERCHANDISE";
+  const pageTitle = isAllOrders ? "Semua Order" : isApparel ? "Order Apparel's" : "Order Merchandise";
   const pageDescription = isAllOrders
     ? "Satu nomor invoice menampilkan semua item dari pesanan yang sama, termasuk merchandise, kaos, dan jaket."
     : isApparel
@@ -1428,8 +1428,7 @@ function renderApparelTypesPage() {
   heading.className = "page-title-row";
   heading.innerHTML = `
     <div>
-      <h1>PENGELOLAAN KATEGORI</h1>
-      <p class="muted"><strong>Jenis Apparel</strong></p>
+      <h1>Jenis Apparel</h1>
       <p class="muted">Tambah jenis pakaian tanpa mengubah kode website.</p>
     </div>
   `;
