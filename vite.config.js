@@ -14,6 +14,7 @@ export default defineConfig({
         adminAllOrders: resolve(__dirname, "admin-all-orders.html"),
         adminApparel: resolve(__dirname, "admin-apparel.html"),
         adminSettings: resolve(__dirname, "admin-settings.html"),
+        adminPromos: resolve(__dirname, "admin-promos.html"),
       },
     },
   },
