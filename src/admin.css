@@ -106,3 +106,55 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}a{color:inherit;
 #productForm label small.muted{display:block;margin-top:5px;font-size:11px;font-weight:600}
 @media(max-width:900px){.apparel-types-panel{padding:20px}}
 @media(max-width:640px){.apparel-types-panel{padding:18px}.apparel-type-grid{grid-template-columns:1fr}}
+
+
+/* Pengaturan: checkbox native/standar, bukan toggle custom atau input selebar form. */
+.settings-layout .toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  cursor: pointer;
+}
+.settings-layout .toggle-row input[type="checkbox"] {
+  appearance: auto;
+  -webkit-appearance: checkbox;
+  flex: 0 0 16px;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+  border: initial;
+  border-radius: initial;
+  background: initial;
+  box-shadow: none;
+  accent-color: auto;
+  cursor: pointer;
+}
+
+
+/* Tombol aksi pada kartu jenis apparel. */
+.apparel-type-actions{display:grid;gap:8px;margin-top:auto}
+.apparel-type-actions .btn{margin-top:0}
+.apparel-type-actions [data-delete-apparel-type]{border-color:#e2b7b7;color:#a52a2a}
+.apparel-type-actions [data-delete-apparel-type]:hover{background:#fff3f3}
+
+
+/* Aksi dua tombol dengan lebar seimbang pada kartu katalog dan jenis apparel. */
+.catalog-card-actions,.apparel-type-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:14px}
+.catalog-card-actions .btn,.apparel-type-actions .btn{width:100%;min-width:0;padding-left:8px;padding-right:8px}
+.btn.danger,.btn.danger-outline{background:#fff;color:#a52a2a;border:1px solid #e2b7b7}
+.btn.danger:hover,.btn.danger-outline:hover{background:#fff3f3}
+.admin-confirm-overlay{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:20px}
+.admin-confirm-backdrop{position:absolute;inset:0;background:rgba(16,20,25,.58);backdrop-filter:blur(2px)}
+.admin-confirm-card{position:relative;width:min(440px,100%);padding:28px;border-radius:18px;background:#fff;box-shadow:0 24px 80px rgba(0,0,0,.24);text-align:center;animation:adminConfirmIn .16s ease-out}
+.admin-confirm-icon{width:44px;height:44px;margin:0 auto 14px;border-radius:50%;display:grid;place-items:center;background:#eef1f4;color:#454c55;font-size:22px;font-weight:900}
+.admin-confirm-icon.danger{background:#fff0f0;color:#a52a2a}
+.admin-confirm-card h2{margin:0 0 8px;font-size:21px}
+.admin-confirm-card p{margin:0;color:#707780;font-size:14px;line-height:1.55}
+.admin-confirm-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:24px}
+.admin-confirm-actions .btn{width:100%}
+@keyframes adminConfirmIn{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+@media(max-width:480px){.catalog-card-actions,.apparel-type-actions{gap:6px}.catalog-card-actions .btn,.apparel-type-actions .btn{font-size:12px;padding:8px 5px}}

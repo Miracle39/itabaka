@@ -14,7 +14,8 @@ let settings = {
   qris_image_url: null,
   bca_account_name: "",
   bca_account_number: "",
-  dp_percentage: 50
+  dp_percentage: 50,
+  full_payment_enabled: true
 };
 let currentStep = 1;
 let promoState = { code: "", valid: false, discount_amount: 0, member_name: "" };
@@ -55,12 +56,7 @@ function showPromoPopup(message, type = "success") {
 
 function paymentDue() {
   const totalAmount = finalTotal();
-  return $("paymentPlan").value === "FULL"
-    ? totalAmount
-    : Math.min(
-        totalAmount,
-        Math.max(1, Math.ceil(totalAmount * Number(settings.dp_percentage || 50) / 100))
-      );
+  return totalAmount;
 }
 
 function loadSettingsFromSession() {
@@ -71,7 +67,7 @@ function loadSettingsFromSession() {
 async function refreshSettings() {
   const { data, error } = await supabase
     .from("site_settings")
-    .select("site_name,site_title,qris_image_url,bca_account_name,bca_account_number,dp_percentage")
+    .select("site_name,site_title,qris_image_url,bca_account_name,bca_account_number,dp_percentage,full_payment_enabled")
     .eq("id", 1)
     .maybeSingle();
 
@@ -166,13 +162,8 @@ function renderShell() {
               <div><h2>Pembayaran</h2><p class="muted small">Bayar sesuai nominal, lalu upload bukti pembayaran.</p></div>
             </div>
 
-            <label>
-              Rencana Pembayaran
-              <select id="paymentPlan">
-                <option value="DP">DP</option>
-                <option value="FULL">Full Payment</option>
-              </select>
-            </label>
+            <input id="paymentPlan" type="hidden" value="FULL">
+            <div id="fullPaymentUnavailable" class="notice error hidden">Pilihan Full Payment sedang dinonaktifkan oleh admin. Silakan hubungi admin untuk informasi pembayaran.</div>
 
             <label>
               Metode Pembayaran
@@ -182,7 +173,7 @@ function renderShell() {
               </select>
             </label>
 
-            <section class="promo-entry-card" aria-labelledby="promoHeading">
+            <section id="promoEntryCard" class="promo-entry-card" aria-labelledby="promoHeading">
               <h3 id="promoHeading">Voucher</h3>
               <div class="promo-entry-row">
                 <input id="promoCode" type="text" maxlength="20" autocomplete="off" placeholder="Voucher Dari Akane" aria-label="Kode promo member">
@@ -213,7 +204,7 @@ function renderShell() {
           <div class="total-row" id="promoDiscountRow" hidden><span>Voucher</span><strong id="promoDiscountAmount">-Rp0</strong></div>
           <div class="total-row"><span>Total Akhir</span><strong id="grandTotal">Rp0</strong></div>
           <div class="total-row"><span>Bayar sekarang</span><strong id="paymentDue">Rp0</strong></div>
-          <p class="muted small">Nominal “Bayar sekarang” mengikuti pilihan DP atau Full Payment.</p>
+          <p class="muted small">Pembayaran dilakukan secara Full Payment.</p>
         </aside>
       </div>
     </section>
@@ -237,7 +228,7 @@ function restoreDraft() {
   $("customerPhone").value = draft.customerPhone || "";
   $("deliveryMethod").value = draft.deliveryMethod || "BOOTH_CF24";
   $("customerAddress").value = draft.customerAddress || "";
-  $("paymentPlan").value = draft.paymentPlan || "DP";
+  $("paymentPlan").value = "FULL";
   $("paymentMethod").value = draft.paymentMethod || "QRIS";
   $("promoCode").value = draft.promoCode || "";
 }
@@ -249,7 +240,7 @@ function saveDraft() {
     customerPhone: $("customerPhone").value,
     deliveryMethod: $("deliveryMethod").value,
     customerAddress: $("customerAddress").value,
-    paymentPlan: $("paymentPlan").value,
+    paymentPlan: "FULL",
     paymentMethod: $("paymentMethod").value,
     promoCode: $("promoCode")?.value || ""
   });
@@ -301,7 +292,12 @@ function setStep(step) {
     checkoutSummary.classList.toggle("hidden", step !== 2);
   }
 
-  if (step === 2) renderPaymentInfo();
+  if (step === 2) {
+    renderPaymentInfo();
+    const disabled = settings.full_payment_enabled === false;
+    $("fullPaymentUnavailable")?.classList.toggle("hidden", !disabled);
+    $("submitButton").disabled = disabled;
+  }
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -347,10 +343,7 @@ function validateCustomerData() {
 function renderPaymentInfo() {
   const due = paymentDue();
   const payableTotal = finalTotal();
-  const planLabel =
-    $("paymentPlan").value === "FULL"
-      ? "Full Payment"
-      : `DP ${settings.dp_percentage || 50}%`;
+  const planLabel = "Full Payment";
 
   if ($("paymentMethod").value === "QRIS") {
     $("paymentInfo").innerHTML = `
@@ -484,6 +477,11 @@ async function submitOrder(event) {
   event.preventDefault();
   if (currentStep !== 2) return;
 
+  if (settings.full_payment_enabled === false) {
+    showNotice("Full Payment sedang dinonaktifkan admin. Pesanan belum dapat dibuat.", "error");
+    return;
+  }
+
   if (!cart.length) {
     showNotice("Keranjang kosong.", "error");
     return;
@@ -536,7 +534,7 @@ async function submitOrder(event) {
       p_customer_address: deliveryMethod === "SHIP_TO_ADDRESS" ? address : null,
       p_customer_phone: $("customerPhone").value.trim(),
       p_delivery_method: deliveryMethod,
-      p_payment_plan: $("paymentPlan").value,
+      p_payment_plan: "FULL",
       p_payment_method: $("paymentMethod").value,
       p_promo_code: promoState.valid ? promoState.code : null,
       p_items: cart.map(item => ({
@@ -596,7 +594,6 @@ async function submitOrder(event) {
 function bindEvents() {
   $("checkoutForm").addEventListener("submit", submitOrder);
   $("deliveryMethod").addEventListener("change", () => { syncDeliveryMethod(); saveDraft(); });
-  $("paymentPlan").addEventListener("change", () => { saveDraft(); renderPaymentInfo(); renderSummary(); });
   $("paymentMethod").addEventListener("change", () => { saveDraft(); renderPaymentInfo(); });
   $("paymentProofFile").addEventListener("change", previewProof);
   $("applyPromo").addEventListener("click", applyPromoCode);
@@ -682,6 +679,9 @@ loadSettingsFromSession();
 renderShell();
 bindEvents();
 await refreshSettings();
+const fullPaymentUnavailable = settings.full_payment_enabled === false;
+$("fullPaymentUnavailable")?.classList.toggle("hidden", !fullPaymentUnavailable);
+$("submitButton").disabled = fullPaymentUnavailable;
 renderSummary();
 renderPaymentInfo();
 

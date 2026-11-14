@@ -17,7 +17,8 @@ let settings = {
   qris_image_url: null,
   bca_account_name: "",
   bca_account_number: "",
-  dp_percentage: 50
+  dp_percentage: 50,
+  full_payment_enabled: true
 };
 let floatingNoticeTimer = null;
 
@@ -86,7 +87,7 @@ function applySettings() {
 async function loadSettings() {
   const { data, error } = await supabase
     .from("site_settings")
-    .select("site_name,site_title,site_description,logo_url,banner_url,qris_image_url,bca_account_name,bca_account_number,dp_percentage")
+    .select("site_name,site_title,site_description,logo_url,banner_url,qris_image_url,bca_account_name,bca_account_number,dp_percentage,full_payment_enabled")
     .eq("id", 1)
     .maybeSingle();
 
@@ -305,7 +306,7 @@ app.innerHTML = `
     <div class="brand" id="siteName">CIRCLE ITABAKA</div>
     <div class="muted" id="siteTitle">Pre-Order CF24</div>
   </div>
-  <div class="catalog-header-actions"><a class="secondary order-lookup-link" href="order-status.html">Cek Pesanan</a><button class="secondary cart-trigger" id="cartButton" type="button">Keranjang <span id="cartCount">0</span></button></div>
+  <div class="catalog-header-actions"><button class="secondary cart-trigger" id="cartButton" type="button">Keranjang <span id="cartCount">0</span></button></div>
 </header>
 
 <main>
@@ -380,5 +381,5 @@ renderCart();
 
 // Keep the customer navigation comfortable on narrow screens.
 const headerStyle = document.createElement("style");
-headerStyle.textContent = `.catalog-header-actions{display:flex;align-items:center;gap:9px}.order-lookup-link{display:inline-flex;align-items:center;text-decoration:none;font-size:13px}@media(max-width:520px){.catalog-header-actions{gap:6px}.order-lookup-link{padding:9px 10px;font-size:12px}.cart-trigger{padding:9px 10px;font-size:12px}}`;
+headerStyle.textContent = `.catalog-header-actions{display:flex;align-items:center;gap:9px}@media(max-width:520px){.catalog-header-actions{gap:6px}.cart-trigger{padding:9px 10px;font-size:12px}}`;
 document.head.append(headerStyle);

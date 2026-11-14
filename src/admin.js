@@ -23,6 +23,39 @@ function msg(text, type = "") {
   msg.timer = setTimeout(() => el.replaceChildren(), 5000);
 }
 
+function confirmDialog({ title = "Konfirmasi", message, confirmText = "Ya, lanjutkan", danger = false } = {}) {
+  return new Promise(resolve => {
+    document.querySelector("#adminConfirmDialog")?.remove();
+    const modal = document.createElement("div");
+    modal.id = "adminConfirmDialog";
+    modal.className = "admin-confirm-overlay";
+    modal.innerHTML = `
+      <div class="admin-confirm-backdrop" data-confirm-cancel></div>
+      <section class="admin-confirm-card" role="dialog" aria-modal="true" aria-labelledby="adminConfirmTitle">
+        <div class="admin-confirm-icon ${danger ? "danger" : ""}">${danger ? "!" : "?"}</div>
+        <h2 id="adminConfirmTitle">${escapeHtml(title)}</h2>
+        <p>${escapeHtml(message || "Apakah kamu yakin ingin melanjutkan?")}</p>
+        <div class="admin-confirm-actions">
+          <button class="btn ghost" type="button" data-confirm-cancel>Batal</button>
+          <button class="btn ${danger ? "danger" : "primary"}" type="button" data-confirm-accept>${escapeHtml(confirmText)}</button>
+        </div>
+      </section>`;
+    document.body.appendChild(modal);
+    const finish = value => {
+      document.removeEventListener("keydown", onKeydown);
+      modal.remove();
+      resolve(value);
+    };
+    const onKeydown = event => {
+      if (event.key === "Escape") finish(false);
+    };
+    modal.querySelectorAll("[data-confirm-cancel]").forEach(el => el.addEventListener("click", () => finish(false)));
+    modal.querySelector("[data-confirm-accept]").addEventListener("click", () => finish(true));
+    document.addEventListener("keydown", onKeydown);
+    modal.querySelector("[data-confirm-accept]").focus();
+  });
+}
+
 function loginView(error = "") {
   app.innerHTML = `
     <div class="login-screen">
@@ -169,7 +202,7 @@ async function loadSettings() {
   const { data, error } = await supabase.from("site_settings").select(`
     id,site_name,site_title,site_description,
     logo_url,banner_url,qris_image_url,
-    bca_account_name,bca_account_number,dp_percentage,
+    bca_account_name,bca_account_number,dp_percentage,full_payment_enabled,
     primary_color,accent_color
   `).eq("id",1).maybeSingle();
   if (error) throw error;
@@ -364,7 +397,7 @@ function renderApparelTypeOptions(selected = null) {
   else if (active.length) select.value = active[0].code;
 }
 
- {
+function renderApparelTypeManager() {
   const target = $("#apparelTypeList");
   if (!target) return;
   target.innerHTML = apparelTypes.length ? `
@@ -376,14 +409,20 @@ function renderApparelTypeOptions(selected = null) {
             <span class="status-pill ${type.is_active ? "active" : "inactive"}">${type.is_active ? "AKTIF" : "NONAKTIF"}</span>
           </div>
           <h3>${escapeHtml(type.name || "Tanpa nama")}</h3>
-          <button class="btn ${type.is_active ? "ghost" : "primary"} full" type="button" data-toggle-apparel-type="${type.id}">
-            ${type.is_active ? "Nonaktifkan" : "Aktifkan"}
-          </button>
+          <div class="apparel-type-actions">
+            <button class="btn ${type.is_active ? "ghost" : "primary"}" type="button" data-toggle-apparel-type="${escapeHtml(type.code)}">
+              ${type.is_active ? "Nonaktifkan" : "Aktifkan"}
+            </button>
+            <button class="btn ghost" type="button" data-delete-apparel-type="${escapeHtml(type.code)}">Hapus</button>
+          </div>
         </article>
       `).join("")}
     </div>` : `<div class="empty-state">Belum ada jenis apparel. Tambahkan jenis pertama melalui formulir di atas.</div>`;
   target.querySelectorAll("[data-toggle-apparel-type]").forEach(button => {
     button.addEventListener("click", () => toggleApparelType(button.dataset.toggleApparelType));
+  });
+  target.querySelectorAll("[data-delete-apparel-type]").forEach(button => {
+    button.addEventListener("click", () => deleteApparelType(button.dataset.deleteApparelType));
   });
 }
 
@@ -392,9 +431,11 @@ async function addApparelType(event) {
   const name = $("#newApparelTypeName").value.trim();
   const code = makeApparelTypeCode(name);
   if (!code) return msg("Nama jenis tidak valid.", "error");
-  if (apparelTypes.some(type => type.code === code || type.name.toLowerCase() === name.toLowerCase())) {
-    return msg("Jenis Apparel tersebut sudah ada.", "error");
-  }
+  const duplicate = apparelTypes.some(type =>
+    String(type.code || "").trim().toUpperCase() === code ||
+    String(type.name || "").trim().toLowerCase() === name.toLowerCase()
+  );
+  if (duplicate) return msg(`Jenis Apparel "${name}" sudah ada. Gunakan nama atau kode yang berbeda.`, "error");
   const { error } = await supabase.from("apparel_types").insert({
     code, name, is_active: true, sort_order: apparelTypes.length * 10
   });
@@ -406,19 +447,56 @@ async function addApparelType(event) {
   msg("Jenis Apparel berhasil ditambahkan.", "success");
 }
 
-async function toggleApparelType(code, active) {
-  const { error } = await supabase.from("apparel_types").update({is_active: active}).eq("code", code);
+async function toggleApparelType(code) {
+  const type = apparelTypes.find(item => item.code === code);
+  if (!type) return msg("Jenis Apparel tidak ditemukan. Muat ulang halaman lalu coba lagi.", "error");
+
+  const active = !type.is_active;
+  const { error } = await supabase
+    .from("apparel_types")
+    .update({ is_active: active })
+    .eq("code", code);
+
   if (error) return msg("Gagal mengubah status jenis: " + error.message, "error");
   await loadApparelTypes();
   renderApparelTypeOptions();
   renderApparelTypeManager();
-  msg(active ? "Jenis Apparel diaktifkan." : "Jenis Apparel dinonaktifkan.", "success");
+  msg(active ? "Jenis Apparel berhasil diaktifkan." : "Jenis Apparel berhasil dinonaktifkan.", "success");
+}
+
+async function deleteApparelType(code) {
+  const type = apparelTypes.find(item => item.code === code);
+  if (!type) return msg("Jenis Apparel tidak ditemukan. Muat ulang halaman lalu coba lagi.", "error");
+
+  // Jangan hapus jenis yang masih dipakai produk agar relasi katalog tetap aman.
+  const { data: linkedProducts, error: checkError } = await supabase
+    .from("products")
+    .select("code")
+    .eq("apparel_type", code)
+    .limit(1);
+  if (checkError) return msg("Gagal memeriksa penggunaan jenis apparel: " + checkError.message, "error");
+  if (linkedProducts?.length) return msg(`Jenis "${type.name}" masih digunakan produk. Nonaktifkan saja jika tidak ingin dipakai lagi.`, "error");
+
+  const confirmed = await confirmDialog({
+    title: "Hapus Jenis Apparel?",
+    message: `Jenis "${type.name}" (${code}) akan dihapus permanen. Tindakan ini tidak dapat dibatalkan.`,
+    confirmText: "Hapus Jenis",
+    danger: true
+  });
+  if (!confirmed) return;
+  const { error } = await supabase.from("apparel_types").delete().eq("code", code);
+  if (error) return msg("Gagal menghapus jenis apparel: " + error.message, "error");
+
+  await loadApparelTypes();
+  renderApparelTypeOptions();
+  renderApparelTypeManager();
+  msg("Jenis Apparel berhasil dihapus.", "success");
 }
 
 function renderCatalogList() {
   const q = ($("#productSearch")?.value || "").toLowerCase().trim();
   const filtered = products.filter(p => `${p.code} ${p.name} ${p.description || ""}`.toLowerCase().includes(q));
-  $("#cfunction renderApparelTypeManager()atalogList").innerHTML = filtered.length ? `
+  $("#catalogList").innerHTML = filtered.length ? `
     <div class="catalog-grid">
       ${filtered.map(p => `
         <article class="catalog-card">
@@ -438,13 +516,48 @@ function renderCatalogList() {
               <div><span>Stok</span><strong>${p.stock ?? "∞"}</strong></div>
               <div><span>Ukuran</span><strong>${(p.available_sizes || []).length ? escapeHtml(p.available_sizes.join(", ")) : "-"}</strong></div>
             </div>
-            <button class="btn ghost full" type="button" data-edit="${p.id}">Edit Produk</button>
+            <div class="catalog-card-actions">
+              <button class="btn ghost" type="button" data-edit="${p.id}">Edit Produk</button>
+              <button class="btn ghost danger-outline" type="button" data-delete-product="${p.id}">Hapus</button>
+            </div>
           </div>
         </article>
       `).join("")}
     </div>` : `<div class="empty-state">Tidak ada produk.</div>`;
 
   document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => editProduct(b.dataset.edit));
+  document.querySelectorAll("[data-delete-product]").forEach(b => b.onclick = () => deleteProduct(b.dataset.deleteProduct));
+}
+
+async function deleteProduct(id) {
+  const product = products.find(item => item.id === id);
+  if (!product) return msg("Produk tidak ditemukan. Muat ulang halaman lalu coba lagi.", "error");
+
+  // Produk yang sudah tercatat dalam pesanan tidak boleh dihapus karena detail order
+  // menyimpan relasi product_id dan foreign key memakai ON DELETE RESTRICT.
+  const { data: linkedItems, error: checkError } = await supabase
+    .from("order_items")
+    .select("id")
+    .eq("product_id", id)
+    .limit(1);
+  if (checkError) return msg("Gagal memeriksa riwayat pesanan produk: " + checkError.message, "error");
+  if (linkedItems?.length) return msg(`Produk "${product.name}" sudah tercatat dalam pesanan dan tidak bisa dihapus. Nonaktifkan produk jika tidak ingin ditampilkan lagi.`, "error");
+
+  const confirmed = await confirmDialog({
+    title: "Hapus Produk?",
+    message: `Produk "${product.name}" (${product.code}) akan dihapus permanen. Tindakan ini tidak dapat dibatalkan.`,
+    confirmText: "Hapus Produk",
+    danger: true
+  });
+  if (!confirmed) return;
+
+  const { error } = await supabase.from("products").delete().eq("id", id);
+  if (error) return msg("Gagal menghapus produk: " + error.message, "error");
+  if (editingProductId === id) resetProductForm();
+  await loadProducts();
+  renderProductsPage();
+  removeApparelTypesPanel();
+  msg(`Produk "${product.name}" berhasil dihapus.`, "success");
 }
 
 function syncApparelTypeField() {
@@ -714,9 +827,7 @@ function renderOrdersTable(mode) {
             }).join("<br>") || "-";
             const payment = getOrderPaymentSummary(o);
             const initialPayment = (o.order_payments || []).find(p => p.payment_type === "INITIAL");
-            const settlementPayment = (o.order_payments || []).find(p => p.payment_type === "SETTLEMENT");
             const hasInitialProof = Boolean(initialPayment?.proof_path || o.payment_proof_path);
-            const hasSettlementProof = Boolean(settlementPayment?.proof_path || o.settlement_proof_path);
             return `<tr>
               <td><strong>${escapeHtml(o.invoice_no)}</strong><small>${formatDate(o.created_at)}</small></td>
               <td><strong>${escapeHtml(o.customer_name)}</strong><small>${escapeHtml(o.customer_email || "-")}</small><small>${escapeHtml(o.customer_phone || o.customer_contact || "-")}</small></td>
@@ -727,8 +838,7 @@ function renderOrdersTable(mode) {
               <td><div class="row-actions">
                 <button class="btn tiny ghost" data-detail="${o.id}" type="button">Detail</button>
                 <button class="btn tiny ghost" data-invoice="${o.id}" type="button">Invoice</button>
-                ${hasInitialProof ? (initialPayment?.proof_path ? `<button class="btn tiny ghost" data-order-id="${o.id}" data-payment-proof="${initialPayment.id}" type="button">Bukti 1</button>` : `<button class="btn tiny ghost" data-proof="${o.id}" type="button">Bukti 1</button>`) : `<span class="no-proof">Bukti 1 belum ada</span>`}
-                ${hasSettlementProof ? (settlementPayment?.proof_path ? `<button class="btn tiny ghost" data-order-id="${o.id}" data-payment-proof="${settlementPayment.id}" type="button">Bukti 2</button>` : `<button class="btn tiny ghost" data-settlement-proof-order="${o.id}" type="button">Bukti 2</button>`) : ""}
+                ${hasInitialProof ? (initialPayment?.proof_path ? `<button class="btn tiny ghost" data-order-id="${o.id}" data-payment-proof="${initialPayment.id}" type="button">Bukti Pembayaran</button>` : `<button class="btn tiny ghost" data-proof="${o.id}" type="button">Bukti Pembayaran</button>`) : `<span class="no-proof">Bukti pembayaran belum ada</span>`}
 
               </div></td>
             </tr>
@@ -740,10 +850,9 @@ function renderOrdersTable(mode) {
 
   document.querySelectorAll("[data-detail]").forEach(b=>b.onclick=()=>$("#detail-"+b.dataset.detail).classList.toggle("hidden"));
   document.querySelectorAll("[data-proof]").forEach(b=>b.onclick=()=>viewProof(b.dataset.proof));
+  document.querySelectorAll("[data-payment-proof]").forEach(b=>b.onclick=()=>viewOrderPaymentProof(b.dataset.orderId,b.dataset.paymentProof));
   document.querySelectorAll("[data-invoice]").forEach(b=>b.onclick=()=>viewOrderInvoice(b.dataset.invoice));
   document.querySelectorAll("[data-edit-payment]").forEach(b=>b.onclick=()=>openPaymentEditor(b.dataset.editPayment));
-  document.querySelectorAll("[data-payment-proof]").forEach(b=>b.onclick=()=>viewOrderPaymentProof(b.dataset.orderId,b.dataset.paymentProof));
-  document.querySelectorAll("[data-settlement-proof-order]").forEach(b=>b.onclick=()=>viewSettlementProofPath(b.dataset.settlementProofOrder));
   document.querySelectorAll("[data-save-payment-check]").forEach(b=>b.onclick=()=>saveInternalPaymentCheck(b.dataset.orderId,b.dataset.savePaymentCheck,mode));
 
   $("#pagination").innerHTML = pages > 1 ? `
@@ -771,6 +880,7 @@ function renderOrderDetail(o, mode) {
       );
 
   const payment = getOrderPaymentSummary(o);
+  const initialProofPayment = (o.order_payments || []).find(p => p.payment_type === "INITIAL" && p.proof_path);
   const rawWaPhone = String(o.customer_phone || o.customer_contact || "").replace(/\D/g, "");
   const waPhone = rawWaPhone.startsWith("0") ? `62${rawWaPhone.slice(1)}` : rawWaPhone;
   const waMessage = encodeURIComponent(`Halo ${o.customer_name || ""}, kami dari tim Itabaka ingin mengonfirmasi pembayaran untuk invoice ${o.invoice_no}. Ada hal yang perlu kami cocokkan terkait nominal atau bukti transfer. Bisa dibantu cek kembali?`);
@@ -794,17 +904,12 @@ function renderOrderDetail(o, mode) {
       <div class="detail-product-row"><strong>Total setelah diskon</strong><strong>${formatRupiah(payment.total)}</strong></div>
       <div class="detail-product-row"><span>Status invoice customer</span><strong>${escapeHtml(o.customer_payment_status || (o.payment_plan === "FULL" ? "LUNAS" : "DP"))}</strong></div>
     </div>
-    <div class="detail-products internal-payment-review"><span>Riwayat Bukti Pembayaran · Pengecekan Internal</span>
-      ${(o.order_payments || []).length ? (o.order_payments || []).map(p => {
-        const title = p.payment_type === "SETTLEMENT" ? "Bukti 2 · Pelunasan" : `Bukti 1 · ${o.payment_plan === "FULL" ? "Full Payment" : "DP"}`;
+    <div class="detail-products internal-payment-review"><span>Bukti Pembayaran · Pengecekan Internal</span>
+      ${(o.payment_proof_path || initialProofPayment?.proof_path) ? `<div class="internal-payment-row" style="border:1px solid #e7e7e7;border-radius:12px;padding:13px;margin:10px 0"><strong>Bukti Full Payment</strong><small style="display:block;color:#777;margin:4px 0 8px">${o.payment_proof_uploaded_at ? "Upload " + formatDate(o.payment_proof_uploaded_at) : "Bukti pembayaran tersimpan"}</small>${initialProofPayment?.proof_path ? `<button class="btn tiny ghost" data-order-id="${o.id}" data-payment-proof="${initialProofPayment.id}" type="button">Lihat Bukti Pembayaran</button>` : `<button class="btn tiny ghost" data-proof="${o.id}" type="button">Lihat Bukti Pembayaran</button>`}</div>` : `<p class="muted small">Belum ada bukti pembayaran yang tercatat.</p>`}
+      ${(o.order_payments || []).filter(p => p.payment_type === "INITIAL").map(p => {
         const reviewLabel = p.internal_status === "MATCHED" ? "Sesuai" : p.internal_status === "CONTACT" ? "Perlu hubungi customer" : "Belum dicek";
-        return `<div class="internal-payment-row" style="border:1px solid #e7e7e7;border-radius:12px;padding:13px;margin:10px 0;display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,1fr);gap:10px;align-items:end">
-          <div><strong>${title}</strong><small style="display:block;color:#777;margin-top:4px">Upload ${formatDate(p.uploaded_at)} · Ekspektasi ${formatRupiah(p.expected_amount)}</small><small style="display:block;color:#777">Nominal dilaporkan ${formatRupiah(p.reported_amount)} · ${reviewLabel}</small>${p.proof_path ? `<button class="btn tiny ghost" data-order-id="${o.id}" data-payment-proof="${p.id}" type="button">Lihat Bukti</button>` : p.payment_type === "INITIAL" && o.payment_proof_path ? `<button class="btn tiny ghost" data-proof="${o.id}" type="button">Lihat Bukti Pembayaran Pertama</button>` : p.payment_type === "SETTLEMENT" && o.settlement_proof_path ? `<button class="btn tiny ghost" data-settlement-proof-order="${o.id}" type="button">Lihat Bukti Pelunasan</button>` : `<small class="muted">File bukti tidak tercatat.</small>`}${waPhone.length >= 8 ? `<a class="btn tiny ghost" href="https://wa.me/${waPhone}?text=${waMessage}" target="_blank" rel="noreferrer">Hubungi via WhatsApp</a>` : ""}</div>
-          <div><label style="font-size:12px">Nominal yang terlihat di rekening<input data-reported-amount="${p.id}" type="number" min="1" step="1" value="${Number(p.reported_amount || p.expected_amount)}" style="margin:4px 0 8px"></label><label style="font-size:12px">Hasil pengecekan<select data-internal-status="${p.id}" style="margin:4px 0 8px"><option value="PENDING" ${p.internal_status === "PENDING" ? "selected" : ""}>Belum dicek</option><option value="MATCHED" ${p.internal_status === "MATCHED" ? "selected" : ""}>Sesuai</option><option value="CONTACT" ${p.internal_status === "CONTACT" ? "selected" : ""}>Perlu hubungi customer</option></select></label><input data-internal-note="${p.id}" type="text" maxlength="500" placeholder="Catatan internal / alasan hubungi customer" value="${escapeHtml(p.internal_note || "")}" style="margin:0 0 8px"><button class="btn tiny primary" data-order-id="${o.id}" data-save-payment-check="${p.id}" type="button">Simpan Pengecekan</button></div>
-        </div>`;
-      }).join("") : `<p class="muted small">Belum ada bukti pembayaran yang tercatat di riwayat verifikasi.</p>`}
-      ${o.payment_proof_path && !(o.order_payments || []).some(p => p.payment_type === "INITIAL") ? `<div class="internal-payment-row" style="border:1px solid #e7e7e7;border-radius:12px;padding:13px;margin:10px 0"><strong>Bukti 1 · ${o.payment_plan === "FULL" ? "Full Payment" : "DP"}</strong><small style="display:block;color:#777;margin:4px 0 8px">${o.payment_proof_uploaded_at ? "Upload " + formatDate(o.payment_proof_uploaded_at) : "Bukti pembayaran awal tersimpan"}</small><button class="btn tiny ghost" data-proof="${o.id}" type="button">Lihat Bukti Pembayaran Pertama</button></div>` : ""}
-      ${o.payment_plan === "DP" && !(o.order_payments || []).some(p => p.payment_type === "SETTLEMENT") ? `<div class="internal-payment-row" style="border:1px solid #e7e7e7;border-radius:12px;padding:13px;margin:10px 0"><strong>Bukti 2 · Pelunasan</strong>${o.settlement_proof_path ? `<small style="display:block;color:#777;margin:4px 0 8px">${o.settlement_proof_uploaded_at ? "Upload " + formatDate(o.settlement_proof_uploaded_at) : "Bukti pelunasan tersimpan"}</small><button class="btn tiny ghost" data-settlement-proof-order="${o.id}" type="button">Lihat Bukti Pelunasan</button>` : `<small style="display:block;color:#777;margin:4px 0 0">Belum diunggah oleh customer.</small>`}</div>` : ""}
+        return `<div class="internal-payment-row" style="border:1px solid #e7e7e7;border-radius:12px;padding:13px;margin:10px 0"><small>Nominal dilaporkan ${formatRupiah(p.reported_amount)} · ${reviewLabel}</small><label style="font-size:12px">Nominal yang terlihat di rekening<input data-reported-amount="${p.id}" type="number" min="1" step="1" value="${Number(p.reported_amount || p.expected_amount)}"></label><label style="font-size:12px">Hasil pengecekan<select data-internal-status="${p.id}"><option value="PENDING" ${p.internal_status === "PENDING" ? "selected" : ""}>Belum dicek</option><option value="MATCHED" ${p.internal_status === "MATCHED" ? "selected" : ""}>Sesuai</option><option value="CONTACT" ${p.internal_status === "CONTACT" ? "selected" : ""}>Perlu hubungi customer</option></select></label><input data-internal-note="${p.id}" type="text" maxlength="500" placeholder="Catatan internal" value="${escapeHtml(p.internal_note || "")}"><button class="btn tiny primary" data-order-id="${o.id}" data-save-payment-check="${p.id}" type="button">Simpan Pengecekan</button></div>`;
+      }).join("")}
     </div>
   </div>`;
 }
@@ -1063,9 +1168,9 @@ function renderSettingsPage() {
       </section>
 
       <section class="panel-card">
-        <div class="panel-head"><div><h2>Pembayaran</h2><p class="muted">Nominal DP dan rekening transfer.</p></div></div>
+        <div class="panel-head"><div><h2>Pembayaran</h2><p class="muted">Atur ketersediaan Full Payment dan rekening transfer.</p></div></div>
         <div class="stack">
-          <label>Persentase DP<input id="sDp" type="number" min="1" max="99" required></label>
+          <label class="toggle-row"><input id="sFullPaymentEnabled" type="checkbox"> Aktifkan Full Payment untuk customer</label>
           <label>Nama Pemilik Rekening BCA<input id="sBcaName"></label>
           <label>Nomor Rekening BCA<input id="sBcaNumber"></label>
         </div>
@@ -1095,7 +1200,7 @@ function renderSettingsPage() {
   $("#sSiteName").value = settings.site_name || "";
   $("#sSiteTitle").value = settings.site_title || "";
   $("#sSiteDescription").value = settings.site_description || "";
-  $("#sDp").value = settings.dp_percentage ?? 50;
+  $("#sFullPaymentEnabled").checked = settings.full_payment_enabled !== false;
   $("#sBcaName").value = settings.bca_account_name || "";
   $("#sBcaNumber").value = settings.bca_account_number || "";
   $("#sPrimary").value = settings.primary_color || "#111111";
@@ -1132,7 +1237,7 @@ async function saveSettings(e) {
       site_name:$("#sSiteName").value.trim(),
       site_title:$("#sSiteTitle").value.trim(),
       site_description:$("#sSiteDescription").value.trim(),
-      dp_percentage:Number($("#sDp").value),
+      full_payment_enabled:$("#sFullPaymentEnabled").checked,
       bca_account_name:$("#sBcaName").value.trim(),
       bca_account_number:$("#sBcaNumber").value.trim(),
       primary_color:$("#sPrimary").value,
@@ -1144,7 +1249,6 @@ async function saveSettings(e) {
     };
 
     if (!payload.site_name || !payload.site_title || !payload.site_description) throw new Error("Nama, judul, dan deskripsi wajib diisi.");
-    if (!Number.isInteger(payload.dp_percentage) || payload.dp_percentage < 1 || payload.dp_percentage > 99) throw new Error("Persentase DP harus 1–99.");
 
     const {error} = await supabase.from("site_settings").upsert(payload,{onConflict:"id"});
     if (error) throw error;

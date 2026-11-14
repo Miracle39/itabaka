@@ -58,7 +58,8 @@ function shell(session) {
           ${navLink("/admin.html","Produk")}
           ${navLink("/admin-all-orders.html","Semua Order")}
           ${navLink("/admin-orders.html","Merchandise")}
-          ${navLink("/admin-apparel.html","Kaos / Jaket")}
+          ${navLink("/admin-apparel.html","Apparel")}
+          ${navLink("/admin.html?page=apparelTypes","Jenis Apparel")}
           ${navLink("/admin-promos.html","Promo Member",true)}
           ${navLink("/admin-settings.html","Pengaturan")}
         </nav>
