@@ -12,6 +12,7 @@ let editingProductId = null;
 let ordersPerPage = 10;
 let currentPage = 1;
 let bootBusy = false;
+let activeOrderCategoryFilter = "ALL";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -707,6 +708,7 @@ function filteredOrders(categoryMode) {
 
 function renderOrdersPage(mode) {
   currentPage = 1;
+  activeOrderCategoryFilter = "ALL";
   const data = filteredOrders(mode);
   const isApparel = mode === "apparel";
   const isAllOrders = mode === "all";
@@ -728,7 +730,7 @@ function renderOrdersPage(mode) {
       <div class="page-count">${data.length} invoice</div>
     </section>
 
-    ${(isApparel || isAllOrders) ? renderSizeSummary(data) : ""}
+    ${renderOrderCategoryCards(data, mode)}
 
     <section class="panel-card orders-panel">
       <div class="orders-toolbar">
@@ -782,6 +784,14 @@ function renderOrdersPage(mode) {
       </div>
     </div>`;
 
+  document.querySelectorAll("[data-order-category]").forEach(card => {
+    card.addEventListener("click", () => {
+      activeOrderCategoryFilter = card.dataset.orderCategory || "ALL";
+      currentPage = 1;
+      document.querySelectorAll("[data-order-category]").forEach(item => item.classList.toggle("active", item === card));
+      renderOrdersTable(mode);
+    });
+  });
   $("#perPage").value = String(ordersPerPage);
   $("#perPage").onchange = () => { ordersPerPage = Number($("#perPage").value); currentPage = 1; renderOrdersTable(mode); };
   $("#orderSearch").oninput = () => { currentPage = 1; renderOrdersTable(mode); };
@@ -792,38 +802,75 @@ function renderOrdersPage(mode) {
   renderOrdersTable(mode);
 }
 
-function renderSizeSummary(data) {
-  const map = new Map();
-  for (const order of data) {
-    for (const item of order.order_items || []) {
-      const apparelType = getOrderItemApparelType(item);
-      if (!apparelType || !item.size) continue;
-      const key = `${apparelType}|${item.size}`;
-      map.set(key, (map.get(key) || 0) + Number(item.quantity || 0));
-    }
-  }
+function renderOrderCategoryCards(data, mode) {
+  const isApparel = mode === "apparel";
+  const cards = [];
+  const countFor = predicate => {
+    const matchingOrders = data.filter(order => (order.order_items || []).some(predicate));
+    const quantity = matchingOrders.reduce((sum, order) => sum + (order.order_items || [])
+      .filter(predicate).reduce((n, item) => n + Number(item.quantity || 0), 0), 0);
+    return { orders: matchingOrders.length, quantity };
+  };
+  const allCount = isApparel
+    ? countFor(item => isOrderItemApparel(item))
+    : { orders: data.length, quantity: data.reduce((sum, order) => sum + (order.order_items || []).reduce((n, item) => n + Number(item.quantity || 0), 0), 0) };
 
-  const rows = [...map.entries()].sort((a,b) => {
-    const [ca,sa]=a[0].split("|"), [cb,sb]=b[0].split("|");
-    return ca.localeCompare(cb) || sa.localeCompare(sb, undefined, {numeric:true});
+  cards.push({
+    code: "ALL",
+    name: isApparel ? "Semua Apparel" : mode === "merchandise" ? "Semua Merchandise" : "Semua Order",
+    ...allCount,
+    kind: "all",
+    sizes: null
   });
 
+  if (!isApparel) {
+    const merch = countFor(item => item.product_category === "MERCHANDISE");
+    cards.push({ code: "MERCHANDISE", name: "Merchandise", ...merch, kind: "merchandise", sizes: null });
+  }
+
+  // Kategori apparel hanya ditampilkan pada Semua Order dan halaman Apparel.
+  // Halaman Merchandise tetap terpisah dan tidak menampilkan card apparel.
+  if (mode !== "merchandise") for (const type of apparelTypes) {
+    const matching = data.filter(order => (order.order_items || []).some(item => getOrderItemApparelType(item) === type.code));
+    const quantity = matching.reduce((sum, order) => sum + (order.order_items || [])
+      .filter(item => getOrderItemApparelType(item) === type.code)
+      .reduce((n, item) => n + Number(item.quantity || 0), 0), 0);
+    const sizes = new Map();
+    for (const order of matching) for (const item of order.order_items || []) {
+      if (getOrderItemApparelType(item) !== type.code || !item.size) continue;
+      sizes.set(item.size, (sizes.get(item.size) || 0) + Number(item.quantity || 0));
+    }
+    cards.push({
+      code: type.code,
+      name: type.name,
+      orders: matching.length,
+      quantity,
+      kind: "apparel",
+      inactive: !type.is_active,
+      sizes: [...sizes.entries()].sort((a,b) => a[0].localeCompare(b[0], undefined, {numeric:true}))
+    });
+  }
+
   return `
-    <section class="size-summary-grid">
-      ${["TSHIRT","JACKET"].map(cat => {
-        const vals = rows.filter(([key]) => key.startsWith(cat + "|"));
-        return `<div class="size-card">
-          <div class="size-card-head"><span>${cat === "TSHIRT" ? "KAOS" : "JAKET"}</span><strong>${vals.reduce((s,[,n])=>s+n,0)}</strong><small>pcs</small></div>
-          <div class="size-list">
-            ${vals.length ? vals.map(([key,n]) => `<div><span>${escapeHtml(key.split("|")[1])}</span><strong>${n}</strong></div>`).join("") : `<span class="muted">Belum ada order ukuran.</span>`}
-          </div>
-        </div>`;
-      }).join("")}
+    <section class="order-category-cards" aria-label="Filter kategori pesanan">
+      ${cards.map(card => `
+        <button type="button" class="order-category-card ${activeOrderCategoryFilter === card.code ? "active" : ""}" data-order-category="${escapeHtml(card.code)}">
+          <span class="order-category-card-top"><strong>${escapeHtml(card.name)}</strong>${card.inactive ? `<small class="order-category-inactive">Nonaktif</small>` : ""}</span>
+          <span class="order-category-card-count">${card.orders} <small>invoice</small></span>
+          <span class="order-category-card-meta">${card.quantity} pcs</span>
+          ${card.sizes?.length ? `<span class="order-category-sizes">${card.sizes.map(([size, qty]) => `<span>${escapeHtml(size)} <b>${qty}</b></span>`).join("")}</span>` : card.kind === "apparel" ? `<span class="order-category-empty">Belum ada pesanan ukuran</span>` : ""}
+        </button>
+      `).join("")}
     </section>`;
 }
 
 function renderOrdersTable(mode) {
-  const all = filteredOrders(mode);
+  const baseOrders = filteredOrders(mode);
+  const all = activeOrderCategoryFilter === "ALL"
+    ? baseOrders
+    : activeOrderCategoryFilter === "MERCHANDISE"
+      ? baseOrders.filter(order => (order.order_items || []).some(item => item.product_category === "MERCHANDISE"))
+      : baseOrders.filter(order => (order.order_items || []).some(item => getOrderItemApparelType(item) === activeOrderCategoryFilter));
   const q = ($("#orderSearch")?.value || "").toLowerCase().trim();
   const filtered = all.filter(o => [
     o.invoice_no,o.customer_name,o.customer_email,o.customer_phone,o.customer_contact
