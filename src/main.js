@@ -311,11 +311,12 @@ app.innerHTML = `
 
 <main>
   <section class="hero" id="hero">
-    <p class="eyebrow">PRE-ORDER</p>
-    <h1 id="heroTitle">Pesan merchandise Itabaka untuk CF24.</h1>
+    <h1 id="heroTitle">Pesan merchandise Itabaka.</h1>
     <p class="muted" id="heroDescription">Pilih produk, masukkan ke keranjang, lalu checkout saat sudah siap.</p>
-    <a class="primary hero-button" href="#products">Lihat Produk</a>
   </section>
+  <div class="hero-cta-row">
+    <a class="primary hero-button" href="#products">Lihat Produk</a>
+  </div>
 
   <section class="section container" id="products">
     <div class="section-head">
@@ -358,7 +359,7 @@ app.innerHTML = `
     </div>
   </div>
 </div>
-<footer class="footer">Circle Itabaka · Development build</footer>
+<footer class="footer">Itabaka Devs Team · ©2026</footer>
 `;
 
 $("productSearch").addEventListener("input", renderProducts);

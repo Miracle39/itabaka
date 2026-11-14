@@ -210,7 +210,7 @@ function renderShell() {
     </section>
   </main>
 
-  <footer class="footer">Circle Itabaka · Development build</footer>
+  <footer class="footer">Itabaka Devs Team · ©2026</footer>
   `;
 
   restoreDraft();

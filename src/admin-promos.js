@@ -69,7 +69,7 @@ function shell(session) {
     </style>
     <div class="admin-app">
       <header class="admin-header"><div class="header-inner">
-        <a class="brand-link" href="/admin.html"><strong>CIRCLE ITABAKA</strong><span>Admin Panel</span></a>
+        <a class="brand-link" href="/admin.html"><strong>ITABAKA</strong><span>Admin Panel</span></a>
         <nav class="main-nav">
           ${navLink("/admin.html","Produk")}
           ${navLink("/admin-all-orders.html","Semua Order")}
@@ -136,7 +136,7 @@ function updateDiscountHint() {
 }
 
 function loginView(error = "") {
-  app.innerHTML = `<div class="login-screen"><section class="login-card"><div class="brand-lockup"><strong>CIRCLE ITABAKA</strong><span>Admin Panel</span></div><h1>Masuk Admin</h1><p class="muted">Kelola kode promo member.</p><div id="loginError">${error ? `<div class="admin-message error">${escapeHtml(error)}</div>` : ""}</div><form id="loginForm" class="stack"><label>Email<input id="loginEmail" type="email" autocomplete="email" required></label><label>Password<input id="loginPassword" type="password" autocomplete="current-password" required></label><button class="btn primary full" type="submit">Masuk</button></form></section></div>`;
+  app.innerHTML = `<div class="login-screen"><section class="login-card"><div class="brand-lockup"><strong>ITABAKA</strong><span>Admin Panel</span></div><h1>Masuk Admin</h1><p class="muted">Kelola kode promo member.</p><div id="loginError">${error ? `<div class="admin-message error">${escapeHtml(error)}</div>` : ""}</div><form id="loginForm" class="stack"><label>Email<input id="loginEmail" type="email" autocomplete="email" required></label><label>Password<input id="loginPassword" type="password" autocomplete="current-password" required></label><button class="btn primary full" type="submit">Masuk</button></form></section></div>`;
   $("#loginForm").onsubmit = login;
 }
 

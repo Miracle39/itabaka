@@ -159,18 +159,164 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}a{color:inherit;
 @keyframes adminConfirmIn{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
 @media(max-width:480px){.catalog-card-actions,.apparel-type-actions{gap:6px}.catalog-card-actions .btn,.apparel-type-actions .btn{font-size:12px;padding:8px 5px}}
 
-/* Kartu filter order dibuat dinamis dari apparel_types Supabase. */
-.order-category-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:0 0 20px}
-.order-category-card{appearance:none;text-align:left;width:100%;min-width:0;padding:17px 18px;background:#fff;border:1px solid #e1e6ea;border-radius:15px;color:inherit;cursor:pointer;display:flex;flex-direction:column;gap:7px;transition:border-color .18s,box-shadow .18s,transform .18s}
-.order-category-card:hover{border-color:#9ca8b5;transform:translateY(-1px)}
-.order-category-card.active{border-color:#263746;box-shadow:0 0 0 2px rgba(38,55,70,.1)}
-.order-category-card-top{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#59636d;font-size:12px;letter-spacing:.04em;text-transform:uppercase}
-.order-category-card-count{font-size:29px;font-weight:900;letter-spacing:-.04em;line-height:1.1;color:#202a33}
-.order-category-card-count small{font-size:11px;font-weight:600;letter-spacing:0;color:#7b838b}
-.order-category-card-meta{font-size:12px;color:#737d86}
-.order-category-inactive{font-size:9px;letter-spacing:0;color:#9a6a24;background:#fff4df;border-radius:20px;padding:3px 7px}
-.order-category-sizes{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}
-.order-category-sizes span{display:inline-flex;align-items:center;gap:5px;padding:4px 7px;border-radius:7px;background:#f4f6f7;border:1px solid #e9edef;font-size:10px;color:#68727c}
-.order-category-sizes b{font-size:11px;color:#27323c}
-.order-category-empty{font-size:10px;color:#969da4;margin-top:4px}
-@media(max-width:600px){.order-category-cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.order-category-card{padding:13px}.order-category-card-count{font-size:24px}}
+/* Kartu produk admin mengikuti proporsi katalog customer (foto portrait 4:5). */
+.catalog-grid {
+  grid-auto-rows: 1fr;
+  align-items: stretch;
+}
+.catalog-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+}
+.catalog-media {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 5;
+  flex: 0 0 auto;
+}
+.catalog-media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+.catalog-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+.catalog-desc {
+  min-height: 4.5em;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.catalog-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 14px;
+}
+.catalog-card-actions .btn {
+  flex: 1 1 auto;
+}
+
+/* Halaman Produk: form di atas, katalog di bawah dengan lebar normal admin. */
+.products-page-grid {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 24px;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  position: static;
+  left: auto;
+  transform: none;
+}
+.products-page-grid > .panel-card,
+.product-form-panel,
+.product-catalog-panel {
+  width: 100%;
+  min-width: 0;
+}
+.catalog-category-section + .catalog-category-section {
+  margin-top: 30px;
+  padding-top: 24px;
+  border-top: 1px solid #e8ebee;
+}
+.catalog-category-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 16px;
+}
+.catalog-category-heading h3 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -.02em;
+}
+.catalog-category-heading span {
+  color: #858c95;
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
+  align-items: stretch;
+  gap: 18px;
+  width: 100%;
+}
+.catalog-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+}
+.catalog-media {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 5;
+  flex: 0 0 auto;
+}
+.catalog-media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+.catalog-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+.catalog-desc {
+  min-height: 4.5em;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.catalog-card-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 14px;
+}
+.catalog-card-actions .btn {
+  width: 100%;
+  min-width: 0;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+@media (max-width: 1100px) {
+  .catalog-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .catalog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+}
+@media (max-width: 420px) {
+  .catalog-grid { grid-template-columns: 1fr; }
+  .catalog-category-heading h3 { font-size: 18px; }
+}
+
+
+/* Product image preview in add/edit product form */
+.product-image-preview-wrap{display:grid;gap:8px;margin-top:2px}
+.product-image-preview-label{font-size:13px;font-weight:700;color:var(--muted,#667085)}
+.product-image-preview{width:min(100%,260px);aspect-ratio:4/5;display:flex;align-items:center;justify-content:center;overflow:hidden;border:1px dashed var(--border,#d0d5dd);border-radius:14px;background:var(--surface-soft,#f8fafc);color:var(--muted,#667085);font-size:13px;text-align:center;padding:12px}
+.product-image-preview img{width:100%;height:100%;object-fit:contain;display:block}
+@media(max-width:640px){.product-image-preview{width:min(100%,220px)}}

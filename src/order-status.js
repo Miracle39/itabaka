@@ -21,7 +21,7 @@ function renderShell() {
   app.innerHTML = `
     <header class="topbar order-status-topbar">
       <a class="brand-link" href="index.html">← Kembali ke Produk</a>
-      <div class="checkout-brand"><strong>Circle Itabaka</strong><span class="muted">Cek Pesanan</span></div>
+      <div class="checkout-brand"><strong>Itabaka</strong><span class="muted">Cek Pesanan</span></div>
     </header>
     <main class="section container order-lookup-page">
       <section class="order-lookup-intro">

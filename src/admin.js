@@ -9,12 +9,46 @@ let orders = [];
 let apparelTypes = [];
 let settings = {};
 let editingProductId = null;
+let currentProductImageUrl = null;
+let productImagePreviewObjectUrl = null;
 let ordersPerPage = 10;
 let currentPage = 1;
 let bootBusy = false;
-let activeOrderCategoryFilter = "ALL";
 
 const $ = (selector) => document.querySelector(selector);
+
+// Format every editable money field as Indonesian thousands groups (100000 -> 100.000).
+// Values are stripped back to digits before being sent to Supabase.
+function formatThousands(value) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+
+function parseMoneyInput(value) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return digits ? Number(digits) : 0;
+}
+
+function formatMoneyField(input) {
+  const oldValue = input.value;
+  const caret = input.selectionStart ?? oldValue.length;
+  const digitsBeforeCaret = oldValue.slice(0, caret).replace(/\D/g, "").length;
+  input.value = formatThousands(oldValue);
+  let nextCaret = 0;
+  let seenDigits = 0;
+  while (nextCaret < input.value.length && seenDigits < digitsBeforeCaret) {
+    if (/\d/.test(input.value[nextCaret])) seenDigits += 1;
+    nextCaret += 1;
+  }
+  input.setSelectionRange(nextCaret, nextCaret);
+}
+
+document.addEventListener("input", event => {
+  const target = event.target;
+  if (target instanceof HTMLInputElement && (target.matches("#pPrice") || target.matches("[data-reported-amount]"))) {
+    formatMoneyField(target);
+  }
+});
 
 function msg(text, type = "") {
   const el = $("#pageMessage");
@@ -62,7 +96,7 @@ function loginView(error = "") {
     <div class="login-screen">
       <section class="login-card">
         <div class="brand-lockup">
-          <strong>CIRCLE ITABAKA</strong>
+          <strong>ITABAKA</strong>
           <span>Admin Panel</span>
         </div>
         <h1>Masuk Admin</h1>
@@ -123,7 +157,7 @@ function shell(session) {
       <header class="admin-header">
         <div class="header-inner">
           <a class="brand-link" href="/admin.html">
-            <strong>CIRCLE ITABAKA</strong>
+            <strong>ITABAKA</strong>
             <span>Admin Panel</span>
           </a>
           <nav class="main-nav">
@@ -301,7 +335,7 @@ function renderProductsPage() {
     </section>
 
     <div class="products-page-grid">
-      <section class="panel-card">
+      <section class="panel-card product-form-panel">
         <div class="panel-head">
           <div><div class="kicker">PRODUK</div><h2 id="productFormTitle">Tambah Produk</h2></div>
           <button class="btn ghost hidden" id="cancelEdit" type="button">Batal</button>
@@ -324,7 +358,7 @@ function renderProductsPage() {
           </div>
           <label>Deskripsi<textarea id="pDescription" rows="4" maxlength="1000"></textarea></label>
           <div class="form-grid two">
-            <label>Harga<input id="pPrice" type="number" min="0" step="1000" required></label>
+            <label>Harga<input id="pPrice" type="text" inputmode="numeric" autocomplete="off" placeholder="Contoh: 100.000" required></label>
             <label>Stok<input id="pStock" type="number" min="0"></label>
           </div>
           <label>Ukuran tersedia <span class="muted">(untuk kaos/jaket)</span>
@@ -337,16 +371,22 @@ function renderProductsPage() {
                 <option value="false">Nonaktif</option>
               </select>
             </label>
-            <label>Foto Produk<input id="pImageFile" type="file" accept="image/png,image/jpeg,image/webp"></label>
+            <label>Foto Produk
+              <input id="pImageFile" type="file" accept="image/png,image/jpeg,image/webp">
+              <small class="muted">Pilih foto produk yang akan diunggah.</small>
+            </label>
           </div>
-          <label>URL gambar (opsional)<input id="pImageUrl" placeholder="https://..."></label>
+          <div id="productImagePreviewWrap" class="product-image-preview-wrap hidden">
+            <span class="product-image-preview-label"></span>
+            <div id="productImagePreview" class="product-image-preview"><span>Belum ada foto produk</span></div>
+          </div>
           <div class="editor-actions">
             <button class="btn primary" type="submit">Simpan Produk</button>
           </div>
         </form>
       </section>
 
-      <section class="panel-card">
+      <section class="panel-card product-catalog-panel">
         <div class="panel-head">
           <div><div class="kicker">KATALOG</div><h2>Daftar Produk</h2></div>
           <input id="productSearch" class="compact-search" placeholder="Cari kode / nama">
@@ -370,6 +410,8 @@ function renderProductsPage() {
   renderApparelTypeManager();
   $("#apparelTypeForm").onsubmit = addApparelType;
   $("#productForm").onsubmit = saveProduct;
+  $("#pImageFile")?.addEventListener("change", handleProductImageSelection);
+  renderProductImagePreview(currentProductImageUrl);
   $("#pCategory")?.addEventListener("change", () => {
     if (!editingProductId && $("#pCode")) $("#pCode").value = generateProductCode($("#pCategory").value);
   });
@@ -485,61 +527,81 @@ async function deleteApparelType(code) {
     danger: true
   });
   if (!confirmed) return;
-  // Minta Supabase mengembalikan baris yang benar-benar terhapus.
-  // DELETE tanpa SELECT dapat terlihat sukses meskipun RLS memblokir penghapusan (0 baris).
-  const { data: deletedRows, error } = await supabase
-    .from("apparel_types")
-    .delete()
-    .eq("code", code)
-    .select("code");
-
+  const { error } = await supabase.from("apparel_types").delete().eq("code", code);
   if (error) return msg("Gagal menghapus jenis apparel: " + error.message, "error");
-  if (!deletedRows?.length) {
-    return msg("Jenis apparel belum terhapus. Supabase tidak mengembalikan baris yang dihapus. Periksa izin DELETE/RLS pada tabel apparel_types.", "error");
-  }
 
   await loadApparelTypes();
   renderApparelTypeOptions();
   renderApparelTypeManager();
-
-  // Verifikasi hasil setelah daftar dimuat ulang.
-  if (apparelTypes.some(item => String(item.code).toUpperCase() === String(code).toUpperCase())) {
-    return msg("Penghapusan belum tercermin pada daftar. Muat ulang halaman dan periksa kebijakan Supabase.", "error");
-  }
-  msg("Jenis Apparel berhasil dihapus dan daftar telah diperbarui.", "success");
+  msg("Jenis Apparel berhasil dihapus.", "success");
 }
 
 function renderCatalogList() {
-  const q = ($("#productSearch")?.value || "").toLowerCase().trim();
-  const filtered = products.filter(p => `${p.code} ${p.name} ${p.description || ""}`.toLowerCase().includes(q));
+  const q = $("#productSearch")?.value || "";
+  const query = q.toLowerCase().trim();
+  const filtered = products.filter(p => `${p.code} ${p.name} ${p.description || ""}`.toLowerCase().includes(query));
+  // Urutkan kode secara numerik dari kecil ke besar agar ITB-2 tampil
+  // sebelum ITB-10 (bukan berdasarkan urutan teks/hasil query Supabase).
+  const compareProductCode = (a, b) => {
+    const codeA = String(a.code || "").trim().toUpperCase();
+    const codeB = String(b.code || "").trim().toUpperCase();
+    const matchA = codeA.match(/^(.*?)(\d+)$/);
+    const matchB = codeB.match(/^(.*?)(\d+)$/);
+    if (matchA && matchB) {
+      const prefixCompare = matchA[1].localeCompare(matchB[1], undefined, { numeric: true });
+      if (prefixCompare !== 0) return prefixCompare;
+      const numberCompare = Number(matchA[2]) - Number(matchB[2]);
+      if (numberCompare !== 0) return numberCompare;
+    }
+    return codeA.localeCompare(codeB, undefined, { numeric: true });
+  };
+  const merchandise = filtered
+    .filter(p => String(p.category || "").toUpperCase() === "MERCHANDISE")
+    .sort(compareProductCode);
+  const apparel = filtered
+    .filter(p => String(p.category || "").toUpperCase() !== "MERCHANDISE")
+    .sort(compareProductCode);
+
+  const renderCards = items => items.map(p => `
+    <article class="catalog-card">
+      <div class="catalog-media">
+        ${p.image_url ? `<img src="${escapeHtml(p.image_url)}" alt="${escapeHtml(p.name)}">` : `<div class="no-image">NO IMAGE</div>`}
+      </div>
+      <div class="catalog-body">
+        <div class="catalog-top">
+          <span class="product-code">${escapeHtml(p.code)}</span>
+          <span class="status-pill ${p.active ? "active":"inactive"}">${p.active ? "AKTIF":"NONAKTIF"}</span>
+        </div>
+        <h3>${escapeHtml(p.name)}</h3>
+        <p class="catalog-desc">${escapeHtml(p.description || "Tidak ada deskripsi.")}</p>
+        <div class="catalog-details">
+          <div><span>Kategori</span><strong>${productCategoryLabel(p.category, p.apparel_type)}</strong></div>
+          <div><span>Harga</span><strong>${formatRupiah(p.price)}</strong></div>
+          <div><span>Stok</span><strong>${p.stock ?? "∞"}</strong></div>
+          <div><span>Ukuran</span><strong>${(p.available_sizes || []).length ? escapeHtml(p.available_sizes.join(", ")) : "-"}</strong></div>
+        </div>
+        <div class="catalog-card-actions">
+          <button class="btn ghost" type="button" data-edit="${p.id}">Edit Produk</button>
+          <button class="btn ghost danger-outline" type="button" data-delete-product="${p.id}">Hapus</button>
+        </div>
+      </div>
+    </article>
+  `).join("");
+
+  const renderGroup = (title, items, className) => items.length ? `
+    <section class="catalog-category-section ${className}">
+      <div class="catalog-category-heading">
+        <h3>${title}</h3>
+        <span>${items.length} produk</span>
+      </div>
+      <div class="catalog-grid">${renderCards(items)}</div>
+    </section>
+  ` : "";
+
   $("#catalogList").innerHTML = filtered.length ? `
-    <div class="catalog-grid">
-      ${filtered.map(p => `
-        <article class="catalog-card">
-          <div class="catalog-media">
-            ${p.image_url ? `<img src="${escapeHtml(p.image_url)}" alt="${escapeHtml(p.name)}">` : `<div class="no-image">NO IMAGE</div>`}
-          </div>
-          <div class="catalog-body">
-            <div class="catalog-top">
-              <span class="product-code">${escapeHtml(p.code)}</span>
-              <span class="status-pill ${p.active ? "active":"inactive"}">${p.active ? "AKTIF":"NONAKTIF"}</span>
-            </div>
-            <h3>${escapeHtml(p.name)}</h3>
-            <p class="catalog-desc">${escapeHtml(p.description || "Tidak ada deskripsi.")}</p>
-            <div class="catalog-details">
-              <div><span>Kategori</span><strong>${productCategoryLabel(p.category, p.apparel_type)}</strong></div>
-              <div><span>Harga</span><strong>${formatRupiah(p.price)}</strong></div>
-              <div><span>Stok</span><strong>${p.stock ?? "∞"}</strong></div>
-              <div><span>Ukuran</span><strong>${(p.available_sizes || []).length ? escapeHtml(p.available_sizes.join(", ")) : "-"}</strong></div>
-            </div>
-            <div class="catalog-card-actions">
-              <button class="btn ghost" type="button" data-edit="${p.id}">Edit Produk</button>
-              <button class="btn ghost danger-outline" type="button" data-delete-product="${p.id}">Hapus</button>
-            </div>
-          </div>
-        </article>
-      `).join("")}
-    </div>` : `<div class="empty-state">Tidak ada produk.</div>`;
+    ${renderGroup("Merchandise", merchandise, "merchandise-section")}
+    ${renderGroup("Apparel", apparel, "apparel-section")}
+  ` : `<div class="empty-state">Tidak ada produk yang cocok dengan pencarian.</div>`;
 
   document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => editProduct(b.dataset.edit));
   document.querySelectorAll("[data-delete-product]").forEach(b => b.onclick = () => deleteProduct(b.dataset.deleteProduct));
@@ -594,19 +656,28 @@ function editProduct(id) {
   renderApparelTypeOptions(p.apparel_type || (p.category === "JACKET" ? "JACKET" : "TSHIRT"));
   syncApparelTypeField();
   $("#pDescription").value = p.description || "";
-  $("#pPrice").value = p.price ?? "";
+  $("#pPrice").value = formatThousands(p.price ?? "");
   $("#pStock").value = p.stock ?? "";
   $("#pSizes").value = (p.available_sizes || []).join(", ");
   $("#pActive").value = String(p.active);
-  $("#pImageUrl").value = p.image_url || "";
+  currentProductImageUrl = p.image_url || null;
+  $("#productImagePreviewWrap")?.classList.remove("hidden");
+  if (productImagePreviewObjectUrl) URL.revokeObjectURL(productImagePreviewObjectUrl);
+  productImagePreviewObjectUrl = null;
   $("#pImageFile").value = "";
+  renderProductImagePreview(currentProductImageUrl);
   $("#cancelEdit").classList.remove("hidden");
   window.scrollTo({top:0, behavior:"smooth"});
 }
 
 function resetProductForm() {
   editingProductId = null;
+  currentProductImageUrl = null;
+  if (productImagePreviewObjectUrl) URL.revokeObjectURL(productImagePreviewObjectUrl);
+  productImagePreviewObjectUrl = null;
   $("#productForm").reset();
+  $("#productImagePreviewWrap")?.classList.add("hidden");
+  renderProductImagePreview(null);
   $("#pCategory").value = "MERCHANDISE";
   renderApparelTypeOptions();
   syncApparelTypeField();
@@ -614,6 +685,48 @@ function resetProductForm() {
   $("#productFormTitle").textContent = "Tambah Produk";
   if (products.length && $("#pCode")) $("#pCode").value = generateProductCode($("#pCategory").value);
   $("#cancelEdit").classList.add("hidden");
+}
+
+function renderProductImagePreview(url) {
+  const preview = $("#productImagePreview");
+  if (!preview) return;
+  if (!url) {
+    preview.innerHTML = "<span>Belum ada foto produk</span>";
+    return;
+  }
+  preview.innerHTML = `<img src="${escapeHtml(url)}" alt="Pratinjau foto produk">`;
+}
+
+function handleProductImageSelection(event) {
+  const file = event.target.files?.[0];
+  if (!file) {
+    if (editingProductId) {
+      $("#productImagePreviewWrap")?.classList.remove("hidden");
+      renderProductImagePreview(currentProductImageUrl);
+    } else {
+      $("#productImagePreviewWrap")?.classList.add("hidden");
+      renderProductImagePreview(null);
+    }
+    return;
+  }
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+    event.target.value = "";
+    msg("Format gambar harus PNG, JPG/JPEG, atau WEBP.", "error");
+    if (editingProductId) renderProductImagePreview(currentProductImageUrl);
+    else $("#productImagePreviewWrap")?.classList.add("hidden");
+    return;
+  }
+  if (file.size > 8 * 1024 * 1024) {
+    event.target.value = "";
+    msg("Ukuran gambar maksimal 8 MB.", "error");
+    if (editingProductId) renderProductImagePreview(currentProductImageUrl);
+    else $("#productImagePreviewWrap")?.classList.add("hidden");
+    return;
+  }
+  if (productImagePreviewObjectUrl) URL.revokeObjectURL(productImagePreviewObjectUrl);
+  productImagePreviewObjectUrl = URL.createObjectURL(file);
+  $("#productImagePreviewWrap")?.classList.remove("hidden");
+  renderProductImagePreview(productImagePreviewObjectUrl);
 }
 
 async function uploadAsset(bucket, folder, file) {
@@ -630,22 +743,18 @@ async function uploadAsset(bucket, folder, file) {
 
 function generateProductCode(category) {
   const prefix = category === "MERCHANDISE" ? "ITB" : "APP";
-  // Gunakan nomor terkecil yang belum dipakai, sehingga kode yang kosong
-  // akibat produk dihapus dapat digunakan kembali (mis. ITB-002).
   const usedNumbers = new Set(
     products
-      .map(product => {
-        const match = String(product.code || "").trim().match(new RegExp("^" + prefix + "-(\\d+)$", "i"));
-        return match ? Number(match[1]) : null;
-      })
-      .filter(number => Number.isInteger(number) && number > 0)
+      .map(product => String(product.code || "").trim().match(new RegExp("^" + prefix + "-(\\d+)$", "i")))
+      .filter(Boolean)
+      .map(match => Number(match[1]))
   );
 
+  // Reuse the lowest available number instead of always incrementing the maximum.
   let nextNumber = 1;
   while (usedNumbers.has(nextNumber)) nextNumber += 1;
   return prefix + "-" + String(nextNumber).padStart(3, "0");
 }
-
 async function saveProduct(e) {
   e.preventDefault();
   const button = e.submitter;
@@ -660,7 +769,7 @@ async function saveProduct(e) {
       throw new Error("Apparel harus memiliki minimal satu ukuran.");
     }
 
-    let imageUrl = $("#pImageUrl").value.trim() || null;
+    let imageUrl = currentProductImageUrl;
     const file = $("#pImageFile").files?.[0];
     if (file) imageUrl = await uploadAsset("product-images","products",file);
 
@@ -670,7 +779,7 @@ async function saveProduct(e) {
       category,
       apparel_type: apparelType,
       description: $("#pDescription").value.trim() || null,
-      price: Number($("#pPrice").value),
+      price: parseMoneyInput($("#pPrice").value),
       stock: $("#pStock").value === "" ? null : Number($("#pStock").value),
       available_sizes: category === "MERCHANDISE" ? [] : [...new Set(sizes)],
       image_url: imageUrl,
@@ -708,7 +817,6 @@ function filteredOrders(categoryMode) {
 
 function renderOrdersPage(mode) {
   currentPage = 1;
-  activeOrderCategoryFilter = "ALL";
   const data = filteredOrders(mode);
   const isApparel = mode === "apparel";
   const isAllOrders = mode === "all";
@@ -730,7 +838,7 @@ function renderOrdersPage(mode) {
       <div class="page-count">${data.length} invoice</div>
     </section>
 
-    ${renderOrderCategoryCards(data, mode)}
+    ${(isApparel || isAllOrders) ? renderSizeSummary(data) : ""}
 
     <section class="panel-card orders-panel">
       <div class="orders-toolbar">
@@ -784,14 +892,6 @@ function renderOrdersPage(mode) {
       </div>
     </div>`;
 
-  document.querySelectorAll("[data-order-category]").forEach(card => {
-    card.addEventListener("click", () => {
-      activeOrderCategoryFilter = card.dataset.orderCategory || "ALL";
-      currentPage = 1;
-      document.querySelectorAll("[data-order-category]").forEach(item => item.classList.toggle("active", item === card));
-      renderOrdersTable(mode);
-    });
-  });
   $("#perPage").value = String(ordersPerPage);
   $("#perPage").onchange = () => { ordersPerPage = Number($("#perPage").value); currentPage = 1; renderOrdersTable(mode); };
   $("#orderSearch").oninput = () => { currentPage = 1; renderOrdersTable(mode); };
@@ -802,75 +902,38 @@ function renderOrdersPage(mode) {
   renderOrdersTable(mode);
 }
 
-function renderOrderCategoryCards(data, mode) {
-  const isApparel = mode === "apparel";
-  const cards = [];
-  const countFor = predicate => {
-    const matchingOrders = data.filter(order => (order.order_items || []).some(predicate));
-    const quantity = matchingOrders.reduce((sum, order) => sum + (order.order_items || [])
-      .filter(predicate).reduce((n, item) => n + Number(item.quantity || 0), 0), 0);
-    return { orders: matchingOrders.length, quantity };
-  };
-  const allCount = isApparel
-    ? countFor(item => isOrderItemApparel(item))
-    : { orders: data.length, quantity: data.reduce((sum, order) => sum + (order.order_items || []).reduce((n, item) => n + Number(item.quantity || 0), 0), 0) };
+function renderSizeSummary(data) {
+  const map = new Map();
+  for (const order of data) {
+    for (const item of order.order_items || []) {
+      const apparelType = getOrderItemApparelType(item);
+      if (!apparelType || !item.size) continue;
+      const key = `${apparelType}|${item.size}`;
+      map.set(key, (map.get(key) || 0) + Number(item.quantity || 0));
+    }
+  }
 
-  cards.push({
-    code: "ALL",
-    name: isApparel ? "Semua Apparel" : mode === "merchandise" ? "Semua Merchandise" : "Semua Order",
-    ...allCount,
-    kind: "all",
-    sizes: null
+  const rows = [...map.entries()].sort((a,b) => {
+    const [ca,sa]=a[0].split("|"), [cb,sb]=b[0].split("|");
+    return ca.localeCompare(cb) || sa.localeCompare(sb, undefined, {numeric:true});
   });
 
-  if (!isApparel) {
-    const merch = countFor(item => item.product_category === "MERCHANDISE");
-    cards.push({ code: "MERCHANDISE", name: "Merchandise", ...merch, kind: "merchandise", sizes: null });
-  }
-
-  // Kategori apparel hanya ditampilkan pada Semua Order dan halaman Apparel.
-  // Halaman Merchandise tetap terpisah dan tidak menampilkan card apparel.
-  if (mode !== "merchandise") for (const type of apparelTypes) {
-    const matching = data.filter(order => (order.order_items || []).some(item => getOrderItemApparelType(item) === type.code));
-    const quantity = matching.reduce((sum, order) => sum + (order.order_items || [])
-      .filter(item => getOrderItemApparelType(item) === type.code)
-      .reduce((n, item) => n + Number(item.quantity || 0), 0), 0);
-    const sizes = new Map();
-    for (const order of matching) for (const item of order.order_items || []) {
-      if (getOrderItemApparelType(item) !== type.code || !item.size) continue;
-      sizes.set(item.size, (sizes.get(item.size) || 0) + Number(item.quantity || 0));
-    }
-    cards.push({
-      code: type.code,
-      name: type.name,
-      orders: matching.length,
-      quantity,
-      kind: "apparel",
-      inactive: !type.is_active,
-      sizes: [...sizes.entries()].sort((a,b) => a[0].localeCompare(b[0], undefined, {numeric:true}))
-    });
-  }
-
   return `
-    <section class="order-category-cards" aria-label="Filter kategori pesanan">
-      ${cards.map(card => `
-        <button type="button" class="order-category-card ${activeOrderCategoryFilter === card.code ? "active" : ""}" data-order-category="${escapeHtml(card.code)}">
-          <span class="order-category-card-top"><strong>${escapeHtml(card.name)}</strong>${card.inactive ? `<small class="order-category-inactive">Nonaktif</small>` : ""}</span>
-          <span class="order-category-card-count">${card.orders} <small>invoice</small></span>
-          <span class="order-category-card-meta">${card.quantity} pcs</span>
-          ${card.sizes?.length ? `<span class="order-category-sizes">${card.sizes.map(([size, qty]) => `<span>${escapeHtml(size)} <b>${qty}</b></span>`).join("")}</span>` : card.kind === "apparel" ? `<span class="order-category-empty">Belum ada pesanan ukuran</span>` : ""}
-        </button>
-      `).join("")}
+    <section class="size-summary-grid">
+      ${["TSHIRT","JACKET"].map(cat => {
+        const vals = rows.filter(([key]) => key.startsWith(cat + "|"));
+        return `<div class="size-card">
+          <div class="size-card-head"><span>${cat === "TSHIRT" ? "KAOS" : "JAKET"}</span><strong>${vals.reduce((s,[,n])=>s+n,0)}</strong><small>pcs</small></div>
+          <div class="size-list">
+            ${vals.length ? vals.map(([key,n]) => `<div><span>${escapeHtml(key.split("|")[1])}</span><strong>${n}</strong></div>`).join("") : `<span class="muted">Belum ada order ukuran.</span>`}
+          </div>
+        </div>`;
+      }).join("")}
     </section>`;
 }
 
 function renderOrdersTable(mode) {
-  const baseOrders = filteredOrders(mode);
-  const all = activeOrderCategoryFilter === "ALL"
-    ? baseOrders
-    : activeOrderCategoryFilter === "MERCHANDISE"
-      ? baseOrders.filter(order => (order.order_items || []).some(item => item.product_category === "MERCHANDISE"))
-      : baseOrders.filter(order => (order.order_items || []).some(item => getOrderItemApparelType(item) === activeOrderCategoryFilter));
+  const all = filteredOrders(mode);
   const q = ($("#orderSearch")?.value || "").toLowerCase().trim();
   const filtered = all.filter(o => [
     o.invoice_no,o.customer_name,o.customer_email,o.customer_phone,o.customer_contact
@@ -979,7 +1042,7 @@ function renderOrderDetail(o, mode) {
       ${(o.payment_proof_path || initialProofPayment?.proof_path) ? `<div class="internal-payment-row" style="border:1px solid #e7e7e7;border-radius:12px;padding:13px;margin:10px 0"><strong>Bukti Full Payment</strong><small style="display:block;color:#777;margin:4px 0 8px">${o.payment_proof_uploaded_at ? "Upload " + formatDate(o.payment_proof_uploaded_at) : "Bukti pembayaran tersimpan"}</small>${initialProofPayment?.proof_path ? `<button class="btn tiny ghost" data-order-id="${o.id}" data-payment-proof="${initialProofPayment.id}" type="button">Lihat Bukti Pembayaran</button>` : `<button class="btn tiny ghost" data-proof="${o.id}" type="button">Lihat Bukti Pembayaran</button>`}</div>` : `<p class="muted small">Belum ada bukti pembayaran yang tercatat.</p>`}
       ${(o.order_payments || []).filter(p => p.payment_type === "INITIAL").map(p => {
         const reviewLabel = p.internal_status === "MATCHED" ? "Sesuai" : p.internal_status === "CONTACT" ? "Perlu hubungi customer" : "Belum dicek";
-        return `<div class="internal-payment-row" style="border:1px solid #e7e7e7;border-radius:12px;padding:13px;margin:10px 0"><small>Nominal dilaporkan ${formatRupiah(p.reported_amount)} · ${reviewLabel}</small><label style="font-size:12px">Nominal yang terlihat di rekening<input data-reported-amount="${p.id}" type="number" min="1" step="1" value="${Number(p.reported_amount || p.expected_amount)}"></label><label style="font-size:12px">Hasil pengecekan<select data-internal-status="${p.id}"><option value="PENDING" ${p.internal_status === "PENDING" ? "selected" : ""}>Belum dicek</option><option value="MATCHED" ${p.internal_status === "MATCHED" ? "selected" : ""}>Sesuai</option><option value="CONTACT" ${p.internal_status === "CONTACT" ? "selected" : ""}>Perlu hubungi customer</option></select></label><input data-internal-note="${p.id}" type="text" maxlength="500" placeholder="Catatan internal" value="${escapeHtml(p.internal_note || "")}"><button class="btn tiny primary" data-order-id="${o.id}" data-save-payment-check="${p.id}" type="button">Simpan Pengecekan</button></div>`;
+        return `<div class="internal-payment-row" style="border:1px solid #e7e7e7;border-radius:12px;padding:13px;margin:10px 0"><small>Nominal dilaporkan ${formatRupiah(p.reported_amount)} · ${reviewLabel}</small><label style="font-size:12px">Nominal yang terlihat di rekening<input data-reported-amount="${p.id}" type="number" min="1" step="1" value="${formatThousands(p.reported_amount || p.expected_amount)}"></label><label style="font-size:12px">Hasil pengecekan<select data-internal-status="${p.id}"><option value="PENDING" ${p.internal_status === "PENDING" ? "selected" : ""}>Belum dicek</option><option value="MATCHED" ${p.internal_status === "MATCHED" ? "selected" : ""}>Sesuai</option><option value="CONTACT" ${p.internal_status === "CONTACT" ? "selected" : ""}>Perlu hubungi customer</option></select></label><input data-internal-note="${p.id}" type="text" maxlength="500" placeholder="Catatan internal" value="${escapeHtml(p.internal_note || "")}"><button class="btn tiny primary" data-order-id="${o.id}" data-save-payment-check="${p.id}" type="button">Simpan Pengecekan</button></div>`;
       }).join("")}
     </div>
   </div>`;
@@ -1194,7 +1257,7 @@ async function saveInternalPaymentCheck(orderId, paymentId, mode) {
   const payment = order?.order_payments?.find(x => x.id === paymentId);
   if (!payment) return;
   const status = document.querySelector(`[data-internal-status="${paymentId}"]`)?.value || "PENDING";
-  const reportedAmount = Number(document.querySelector(`[data-reported-amount="${paymentId}"]`)?.value);
+  const reportedAmount = parseMoneyInput(document.querySelector(`[data-reported-amount="${paymentId}"]`)?.value);
   const note = document.querySelector(`[data-internal-note="${paymentId}"]`)?.value.trim() || null;
   if (!Number.isInteger(reportedAmount) || reportedAmount <= 0) {
     msg("Nominal yang dicek harus berupa angka bulat lebih dari 0.", "error");
@@ -1234,7 +1297,7 @@ function renderSettingsPage() {
         <div class="stack">
           <label>Nama Situs<input id="sSiteName" required></label>
           <label>Judul Situs<input id="sSiteTitle" required></label>
-          <label>Deskripsi<textarea id="sSiteDescription" rows="4" required></textarea></label>
+          <label>Deskripsi<textarea id="sSiteDescription" rows="4" placeholder="Opsional — boleh dikosongkan"></textarea></label>
         </div>
       </section>
 
@@ -1319,7 +1382,7 @@ async function saveSettings(e) {
       updated_at:new Date().toISOString()
     };
 
-    if (!payload.site_name || !payload.site_title || !payload.site_description) throw new Error("Nama, judul, dan deskripsi wajib diisi.");
+    if (!payload.site_name || !payload.site_title) throw new Error("Nama dan judul situs wajib diisi.");
 
     const {error} = await supabase.from("site_settings").upsert(payload,{onConflict:"id"});
     if (error) throw error;
