@@ -23,6 +23,17 @@ function formatDiscount(member) {
     : formatRupiah(member.discount_value);
 }
 
+function formatDiscountInput(value, type = $("#discountType")?.value) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (!digits) return "";
+  const number = String(Number(digits));
+  return type === "FIXED" ? number.replace(/\B(?=(\d{3})+(?!\d))/g, ".") : number;
+}
+
+function parseDiscountInput(value) {
+  return Number(String(value ?? "").replace(/\D/g, ""));
+}
+
 function navLink(href, label, active = false) {
   return `<a class="nav-link ${active ? "active" : ""}" href="${href}">${label}</a>`;
 }
@@ -38,6 +49,10 @@ function shell(session) {
       .promo-admin-form label{display:grid;gap:7px;font-weight:650;font-size:13px}
       .promo-admin-form input,.promo-admin-form select{width:100%;min-height:43px;border:1px solid #d8d8d8;border-radius:10px;padding:10px 12px;font:inherit;background:#fff}
       .promo-admin-form .form-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:4px}
+      .promo-member-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0 18px}
+      .promo-member-stat{border:1px solid #e8e8e8;background:#fafafa;border-radius:13px;padding:14px 16px;display:grid;gap:5px}
+      .promo-member-stat span{font-size:12px;color:#777;font-weight:650}
+      .promo-member-stat strong{font-size:23px;line-height:1.2;font-weight:850;color:#171717}
       .promo-admin-table-wrap{overflow:auto}
       .promo-admin-table{width:100%;border-collapse:collapse;min-width:720px}
       .promo-admin-table th,.promo-admin-table td{padding:12px 10px;text-align:left;border-bottom:1px solid #eee;font-size:13px;vertical-align:middle}
@@ -50,6 +65,7 @@ function shell(session) {
       .promo-modal{width:min(430px,100%);background:#fff;border-radius:18px;padding:23px;box-shadow:0 25px 80px rgba(0,0,0,.2)}
       .promo-modal h3{margin:0 0 9px}.promo-modal p{color:#666;line-height:1.55}.promo-modal-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:20px}
       @media(max-width:950px){.promo-admin-grid{grid-template-columns:1fr}}
+      @media(max-width:520px){.promo-member-summary{grid-template-columns:1fr}}
     </style>
     <div class="admin-app">
       <header class="admin-header"><div class="header-inner">
@@ -76,7 +92,7 @@ function shell(session) {
               <label>Nama Member<input id="memberName" maxlength="120" required placeholder="Nama member"></label>
               <label>Nomor Polisi / Kode Promo<input id="plateCode" maxlength="20" required placeholder="D 1234 ABC"></label>
               <label>Jenis Diskon<select id="discountType"><option value="PERCENT">Persentase (%)</option><option value="FIXED">Nominal Rupiah (Rp)</option></select></label>
-              <label>Nilai Diskon<input id="discountValue" type="number" min="1" step="1" required placeholder="Contoh: 10 atau 15000"></label>
+              <label>Nilai Diskon<input id="discountValue" type="text" inputmode="numeric" autocomplete="off" required placeholder="Contoh: 10 atau 15.000"></label>
               <label>Status<select id="memberActive"><option value="true">Aktif</option><option value="false">Nonaktif</option></select></label>
               <div class="form-actions"><button class="btn primary" type="submit" id="saveMember">Simpan</button><button class="btn ghost" type="button" id="cancelEdit" hidden>Batal Edit</button></div>
             </form>
@@ -95,6 +111,19 @@ function shell(session) {
   $("#cancelEdit").onclick = resetForm;
   $("#refreshMembers").onclick = loadMembers;
   $("#discountType").onchange = updateDiscountHint;
+  $("#discountValue").addEventListener("input", event => {
+    const input = event.currentTarget;
+    const before = input.value;
+    const cursor = input.selectionStart ?? before.length;
+    const digitsBeforeCursor = before.slice(0, cursor).replace(/\D/g, "").length;
+    input.value = formatDiscountInput(before);
+    let nextCursor = 0, seen = 0;
+    while (nextCursor < input.value.length && seen < digitsBeforeCursor) {
+      if (/\d/.test(input.value[nextCursor])) seen++;
+      nextCursor++;
+    }
+    input.setSelectionRange(nextCursor, nextCursor);
+  });
   updateDiscountHint();
 }
 
@@ -102,8 +131,8 @@ function updateDiscountHint() {
   const type = $("#discountType")?.value;
   const input = $("#discountValue");
   if (!input) return;
-  input.max = type === "PERCENT" ? "100" : "999999999";
-  input.placeholder = type === "PERCENT" ? "1–99" : "Contoh: 15000";
+  input.placeholder = type === "PERCENT" ? "1–99" : "Contoh: 15.000";
+  input.value = formatDiscountInput(input.value, type);
 }
 
 function loginView(error = "") {
@@ -134,10 +163,13 @@ async function loadMembers() {
 }
 
 function renderMembers() {
-  $("#memberTable").innerHTML = members.length ? `<table class="promo-admin-table"><thead><tr><th>Member / Kode</th><th>Diskon</th><th>Status</th><th>Terpakai</th><th>Aksi</th></tr></thead><tbody>${members.map(m => {
+  const totalMembers = members.length;
+  const usedMembers = members.filter(member => member.is_used).length;
+  const summary = `<div class="promo-member-summary"><div class="promo-member-stat"><span>Total Member</span><strong>${totalMembers}</strong></div><div class="promo-member-stat"><span>Voucher Digunakan</span><strong>${usedMembers}/${totalMembers}</strong></div></div>`;
+  $("#memberTable").innerHTML = summary + (members.length ? `<table class="promo-admin-table"><thead><tr><th>Member / Kode</th><th>Diskon</th><th>Status</th><th>Terpakai</th><th>Aksi</th></tr></thead><tbody>${members.map(m => {
     const status = !m.is_active ? `<span class="promo-state off">Nonaktif</span>` : m.is_used ? `<span class="promo-state used">Sudah dipakai</span>` : `<span class="promo-state ready">Tersedia</span>`;
     return `<tr><td><strong>${escapeHtml(m.member_name)}</strong><br><code>${escapeHtml(m.plate_code)}</code></td><td>${escapeHtml(formatDiscount(m))}</td><td>${status}</td><td>${m.used_at ? escapeHtml(formatDate(m.used_at)) : "-"}</td><td><div class="actions"><button class="btn ghost" data-edit="${m.id}" type="button">Edit</button><button class="btn ghost" data-toggle="${m.id}" type="button">${m.is_active ? "Nonaktifkan" : "Aktifkan"}</button>${m.is_used ? `<button class="btn ghost" data-reset="${m.id}" type="button">Reset Pakai</button>` : ""}<button class="btn ghost" data-delete="${m.id}" type="button">Hapus</button></div></td></tr>`;
-  }).join("")}</tbody></table>` : `<p class="muted">Belum ada member promo. Tambahkan member melalui formulir di samping.</p>`;
+  }).join("")}</tbody></table>` : `<p class="muted">Belum ada member promo. Tambahkan member melalui formulir di samping.</p>`);
   $("#memberTable").querySelectorAll("[data-edit]").forEach(b => b.onclick = () => editMember(b.dataset.edit));
   $("#memberTable").querySelectorAll("[data-toggle]").forEach(b => b.onclick = () => toggleMember(b.dataset.toggle));
   $("#memberTable").querySelectorAll("[data-reset]").forEach(b => b.onclick = () => resetUsage(b.dataset.reset));
@@ -152,7 +184,7 @@ function editMember(id) {
   $("#memberName").value = m.member_name;
   $("#plateCode").value = m.plate_code;
   $("#discountType").value = m.discount_type;
-  $("#discountValue").value = m.discount_value;
+  $("#discountValue").value = formatDiscountInput(m.discount_value, m.discount_type);
   $("#memberActive").value = String(m.is_active);
   $("#cancelEdit").hidden = false;
   updateDiscountHint();
@@ -172,7 +204,7 @@ async function saveMember(event) {
   const member_name = $("#memberName").value.trim();
   const plate_code = normalizePlate($("#plateCode").value);
   const discount_type = $("#discountType").value;
-  const discount_value = Number($("#discountValue").value);
+  const discount_value = parseDiscountInput($("#discountValue").value);
   const is_active = $("#memberActive").value === "true";
   if (!member_name || !plate_code) return message("Nama dan nomor polisi wajib diisi.","error");
   if (!/^[A-Z0-9][A-Z0-9 -]{1,18}[A-Z0-9]$/.test(plate_code)) return message("Format nomor polisi tidak valid. Contoh: D 1234 ABC.","error");

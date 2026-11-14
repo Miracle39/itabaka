@@ -13,5 +13,5 @@ export function escapeHtml(value) {
 }
 
 export function formatDate(value) {
-  return new Intl.DateTimeFormat("id-ID", { dateStyle: "long", timeZone: "Asia/Jakarta" }).format(new Date(value));
+  return new Intl.DateTimeFormat("id-ID", { dateStyle: "long", timeStyle: "medium", hourCycle: "h23", timeZone: "Asia/Jakarta" }).format(new Date(value));
 }

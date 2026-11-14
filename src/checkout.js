@@ -428,7 +428,7 @@ async function applyPromoCode() {
   const code = (input?.value || "").trim().toUpperCase().replace(/\s+/g, " ");
   promoState = { code: "", valid: false, discount_amount: 0, member_name: "" };
   if (!code) {
-    $("promoFeedback").textContent = "Masukkan nomor polisi member terlebih dahulu.";
+    $("promoFeedback").textContent = "Masukkan surat cinta dari akane terlebih dahulu.";
     $("promoFeedback").className = "promo-feedback error";
     renderSummary(); renderPaymentInfo(); saveDraft();
     return;
