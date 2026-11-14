@@ -342,7 +342,7 @@ function renderProductsPage() {
         </div>
         <form id="productForm" class="stack">
           <div class="form-grid two">
-            <label>Kode Produk<input id="pCode" maxlength="40" readonly required><small class="muted">Kode dibuat otomatis: ITB untuk merchandise, APP untuk apparel.</small></label>
+            <label>Kode Produk<input id="pCode" maxlength="40" readonly required></label>
             <label>Nama Produk<input id="pName" maxlength="120" required></label>
           </div>
           <div class="form-grid two">
@@ -373,7 +373,6 @@ function renderProductsPage() {
             </label>
             <label>Foto Produk
               <input id="pImageFile" type="file" accept="image/png,image/jpeg,image/webp">
-              <small class="muted">Pilih foto produk yang akan diunggah.</small>
             </label>
           </div>
           <div id="productImagePreviewWrap" class="product-image-preview-wrap hidden">
