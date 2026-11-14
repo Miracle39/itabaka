@@ -484,13 +484,28 @@ async function deleteApparelType(code) {
     danger: true
   });
   if (!confirmed) return;
-  const { error } = await supabase.from("apparel_types").delete().eq("code", code);
+  // Minta Supabase mengembalikan baris yang benar-benar terhapus.
+  // DELETE tanpa SELECT dapat terlihat sukses meskipun RLS memblokir penghapusan (0 baris).
+  const { data: deletedRows, error } = await supabase
+    .from("apparel_types")
+    .delete()
+    .eq("code", code)
+    .select("code");
+
   if (error) return msg("Gagal menghapus jenis apparel: " + error.message, "error");
+  if (!deletedRows?.length) {
+    return msg("Jenis apparel belum terhapus. Supabase tidak mengembalikan baris yang dihapus. Periksa izin DELETE/RLS pada tabel apparel_types.", "error");
+  }
 
   await loadApparelTypes();
   renderApparelTypeOptions();
   renderApparelTypeManager();
-  msg("Jenis Apparel berhasil dihapus.", "success");
+
+  // Verifikasi hasil setelah daftar dimuat ulang.
+  if (apparelTypes.some(item => String(item.code).toUpperCase() === String(code).toUpperCase())) {
+    return msg("Penghapusan belum tercermin pada daftar. Muat ulang halaman dan periksa kebijakan Supabase.", "error");
+  }
+  msg("Jenis Apparel berhasil dihapus dan daftar telah diperbarui.", "success");
 }
 
 function renderCatalogList() {
@@ -614,11 +629,20 @@ async function uploadAsset(bucket, folder, file) {
 
 function generateProductCode(category) {
   const prefix = category === "MERCHANDISE" ? "ITB" : "APP";
-  const largest = products.reduce((max, product) => {
-    const match = String(product.code || "").trim().match(new RegExp("^" + prefix + "-(\\d+)$", "i"));
-    return match ? Math.max(max, Number(match[1])) : max;
-  }, 0);
-  return prefix + "-" + String(largest + 1).padStart(3, "0");
+  // Gunakan nomor terkecil yang belum dipakai, sehingga kode yang kosong
+  // akibat produk dihapus dapat digunakan kembali (mis. ITB-002).
+  const usedNumbers = new Set(
+    products
+      .map(product => {
+        const match = String(product.code || "").trim().match(new RegExp("^" + prefix + "-(\\d+)$", "i"));
+        return match ? Number(match[1]) : null;
+      })
+      .filter(number => Number.isInteger(number) && number > 0)
+  );
+
+  let nextNumber = 1;
+  while (usedNumbers.has(nextNumber)) nextNumber += 1;
+  return prefix + "-" + String(nextNumber).padStart(3, "0");
 }
 
 async function saveProduct(e) {
